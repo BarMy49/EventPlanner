@@ -629,7 +629,7 @@ function App() {
         </div>
       </aside>
 
-      <section className={`card calendar-card ${mobilePanel === 'calendar' ? 'mobile-active' : ''}`}>
+      <section className={`card calendar-card calendar-${calendarView}-view ${mobilePanel === 'calendar' ? 'mobile-active' : ''}`}>
         <div className="calendar-nav">
           <div className="nav-group">
             <button type="button" className="secondary icon-label" onClick={() => navigateCalendar(-1)}>
