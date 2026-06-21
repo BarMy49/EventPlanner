@@ -43,7 +43,7 @@ npm run dev
 Frontend działa na:
 
 ```text
-http://localhost:5173
+http://localhost
 ```
 
 ## Uruchomienie w Dockerze
@@ -55,7 +55,7 @@ docker compose up --build
 Frontend działa na:
 
 ```text
-http://localhost:5173
+http://localhost
 ```
 
 API działa na:
@@ -76,6 +76,9 @@ Możesz zmienić dane admina i sekret JWT przez zmienne środowiskowe:
 ```bash
 ADMIN_USERNAME=admin ADMIN_PASSWORD=strong-password SECRET_KEY=change-me docker compose up --build
 ```
+
+`docker-compose.yml` przekazuje `ADMIN_USERNAME` i `ADMIN_PASSWORD` do backendu.
+Backend czyta je przy starcie i tworzy albo aktualizuje konto administratora o tej nazwie.
 
 ## Gdzie są dane?
 

@@ -9,7 +9,15 @@ from .store import load_data, save_data, find_user_by_username
 
 app = FastAPI(title="Event Planner API")
 
-DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "admin123"
+DEFAULT_CORS_ORIGINS = ["http://localhost", "http://127.0.0.1"]
+
+
+def admin_credentials() -> tuple[str, str]:
+    username = os.getenv("ADMIN_USERNAME", DEFAULT_ADMIN_USERNAME).strip() or DEFAULT_ADMIN_USERNAME
+    password = os.getenv("ADMIN_PASSWORD") or DEFAULT_ADMIN_PASSWORD
+    return username, password
 
 
 def cors_origins() -> list[str]:
@@ -62,14 +70,19 @@ def resolve_target_user_id(user_id: int | None, current_user: dict, store: dict,
 
 
 def ensure_admin_user() -> None:
-    username = os.getenv("ADMIN_USERNAME", "admin")
-    password = os.getenv("ADMIN_PASSWORD", "admin123")
+    username, password = admin_credentials()
     store = load_data()
     admin = next((u for u in store["users"] if u["username"] == username), None)
 
     if admin:
+        changed = False
         if not admin.get("is_admin"):
             admin["is_admin"] = True
+            changed = True
+        if not admin.get("password_hash") or not verify_password(password, admin["password_hash"]):
+            admin["password_hash"] = hash_password(password)
+            changed = True
+        if changed:
             save_data(store)
         return
 
