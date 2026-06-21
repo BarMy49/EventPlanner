@@ -1,9 +1,22 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from .schemas import UserCreate, Token, UserOut, BusySlotCreate, BusySlotUpdate, BusySlotOut, CommonBusyOut
+from .schemas import (
+    UserCreate,
+    UserAdminCreate,
+    UserAdminUpdate,
+    Token,
+    UserOut,
+    BusySlotCreate,
+    BusySlotUpdate,
+    BusySlotOut,
+    CommonBusyOut,
+    ProposalCreate,
+    ProposalVoteCreate,
+    ProposalOut,
+)
 from .auth import hash_password, verify_password, create_access_token, get_current_user
 from .store import load_data, save_data, find_user_by_username
 
@@ -60,6 +73,26 @@ def require_admin(user: dict) -> None:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
 
+def find_user_by_id(store: dict, user_id: int) -> dict:
+    user = next((item for item in store["users"] if item["id"] == user_id), None)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+def ensure_unique_username(store: dict, username: str, except_user_id: int | None = None) -> None:
+    if any(user["username"] == username and user["id"] != except_user_id for user in store["users"]):
+        raise HTTPException(status_code=409, detail="Username already exists")
+
+
+def admin_count(store: dict) -> int:
+    return sum(1 for user in store["users"] if user.get("is_admin"))
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def resolve_target_user_id(user_id: int | None, current_user: dict, store: dict, default_user_id: int) -> int:
     target_user_id = user_id if user_id is not None else default_user_id
     if target_user_id != current_user["id"] and not is_admin(current_user):
@@ -67,6 +100,58 @@ def resolve_target_user_id(user_id: int | None, current_user: dict, store: dict,
     if not any(u["id"] == target_user_id for u in store["users"]):
         raise HTTPException(status_code=404, detail="Target user not found")
     return target_user_id
+
+
+def proposal_results(proposal: dict) -> dict:
+    votes = proposal.get("votes", [])
+    yes_count = sum(1 for vote in votes if vote.get("vote") == "yes")
+    no_count = sum(1 for vote in votes if vote.get("vote") == "no")
+    total_votes = yes_count + no_count
+
+    return {
+        "yes_count": yes_count,
+        "no_count": no_count,
+        "total_votes": total_votes,
+        "yes_percent": round((yes_count / total_votes) * 100, 1) if total_votes else 0,
+        "no_percent": round((no_count / total_votes) * 100, 1) if total_votes else 0,
+    }
+
+
+def proposal_public(proposal: dict, users_by_id: dict[int, dict], current_user: dict) -> ProposalOut:
+    creator = users_by_id.get(proposal["creator_user_id"])
+    my_vote = next(
+        (vote.get("vote") for vote in proposal.get("votes", []) if vote.get("user_id") == current_user["id"]),
+        None,
+    )
+    can_manage = proposal["creator_user_id"] == current_user["id"] or is_admin(current_user)
+    status_value = proposal.get("status", "open")
+
+    return ProposalOut(
+        id=proposal["id"],
+        creator_user_id=proposal["creator_user_id"],
+        creator_username=creator["username"] if creator else "unknown",
+        title=proposal["title"],
+        start_time=datetime.fromisoformat(proposal["start_time"]),
+        end_time=datetime.fromisoformat(proposal["end_time"]),
+        status=status_value,
+        created_at=datetime.fromisoformat(proposal["created_at"]),
+        closed_at=datetime.fromisoformat(proposal["closed_at"]) if proposal.get("closed_at") else None,
+        my_vote=my_vote,
+        can_manage=can_manage,
+        results=proposal_results(proposal) if status_value == "closed" else None,
+    )
+
+
+def find_proposal(store: dict, proposal_id: int) -> dict:
+    proposal = next((item for item in store["proposals"] if item["id"] == proposal_id), None)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return proposal
+
+
+def require_proposal_manager(proposal: dict, current_user: dict) -> None:
+    if proposal["creator_user_id"] != current_user["id"] and not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only the creator or admin can manage this proposal")
 
 
 def ensure_admin_user() -> None:
@@ -140,10 +225,88 @@ def me(user: dict = Depends(get_current_user)):
 
 @app.get("/users", response_model=list[UserOut])
 def list_users(current_user: dict = Depends(get_current_user)):
-    require_admin(current_user)
     store = load_data()
     users = sorted(store["users"], key=lambda u: u["username"].lower())
     return [user_public(user) for user in users]
+
+
+@app.post("/users", response_model=UserOut)
+def create_user_by_admin(data: UserAdminCreate, current_user: dict = Depends(get_current_user)):
+    require_admin(current_user)
+    username = data.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username is required")
+
+    store = load_data()
+    ensure_unique_username(store, username)
+    user = {
+        "id": store["next_user_id"],
+        "username": username,
+        "password_hash": hash_password(data.password),
+        "is_admin": data.is_admin,
+    }
+    store["next_user_id"] += 1
+    store["users"].append(user)
+    save_data(store)
+    return user_public(user)
+
+
+@app.put("/users/{user_id}", response_model=UserOut)
+def update_user_by_admin(
+    user_id: int,
+    data: UserAdminUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    require_admin(current_user)
+    store = load_data()
+    user = find_user_by_id(store, user_id)
+
+    if data.username is not None:
+        username = data.username.strip()
+        if not username:
+            raise HTTPException(status_code=400, detail="Username is required")
+        if user_id == current_user["id"] and username != user["username"]:
+            raise HTTPException(status_code=400, detail="Cannot rename your own account while logged in")
+        ensure_unique_username(store, username, except_user_id=user_id)
+        user["username"] = username
+
+    if data.password:
+        user["password_hash"] = hash_password(data.password)
+
+    if data.is_admin is not None:
+        if user_id == current_user["id"] and not data.is_admin:
+            raise HTTPException(status_code=400, detail="Cannot remove admin role from your own account")
+        if user.get("is_admin") and not data.is_admin and admin_count(store) <= 1:
+            raise HTTPException(status_code=400, detail="Cannot remove the last admin")
+        user["is_admin"] = data.is_admin
+
+    save_data(store)
+    return user_public(user)
+
+
+@app.delete("/users/{user_id}")
+def delete_user_by_admin(user_id: int, current_user: dict = Depends(get_current_user)):
+    require_admin(current_user)
+    if user_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    store = load_data()
+    user = find_user_by_id(store, user_id)
+    if user.get("is_admin") and admin_count(store) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the last admin")
+
+    store["users"] = [item for item in store["users"] if item["id"] != user_id]
+    store["busy_slots"] = [slot for slot in store["busy_slots"] if slot["user_id"] != user_id]
+    store["proposals"] = [
+        proposal
+        for proposal in store["proposals"]
+        if proposal["creator_user_id"] != user_id
+    ]
+    for proposal in store["proposals"]:
+        proposal["votes"] = [vote for vote in proposal.get("votes", []) if vote.get("user_id") != user_id]
+
+    save_data(store)
+    return {"deleted": True}
 
 
 @app.get("/busy", response_model=list[BusySlotOut])
@@ -206,6 +369,100 @@ def delete_busy(slot_id: int, current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Only admins can manage other users' busy slots")
 
     store["busy_slots"] = [s for s in store["busy_slots"] if s["id"] != slot_id]
+    save_data(store)
+    return {"deleted": True}
+
+
+@app.get("/proposals", response_model=list[ProposalOut])
+def list_proposals(current_user: dict = Depends(get_current_user)):
+    store = load_data()
+    users_by_id = {u["id"]: u for u in store["users"]}
+    proposals = sorted(
+        store["proposals"],
+        key=lambda proposal: (
+            proposal.get("status") == "closed",
+            proposal["start_time"],
+            proposal["id"],
+        ),
+    )
+    return [proposal_public(proposal, users_by_id, current_user) for proposal in proposals]
+
+
+@app.post("/proposals", response_model=ProposalOut)
+def create_proposal(data: ProposalCreate, current_user: dict = Depends(get_current_user)):
+    title = data.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Proposal title is required")
+    if data.end_time <= data.start_time:
+        raise HTTPException(status_code=400, detail="end_time must be after start_time")
+
+    store = load_data()
+    proposal = {
+        "id": store["next_proposal_id"],
+        "creator_user_id": current_user["id"],
+        "title": title,
+        "start_time": data.start_time.isoformat(),
+        "end_time": data.end_time.isoformat(),
+        "status": "open",
+        "created_at": now_iso(),
+        "closed_at": None,
+        "votes": [],
+    }
+    store["next_proposal_id"] += 1
+    store["proposals"].append(proposal)
+    save_data(store)
+
+    users_by_id = {u["id"]: u for u in store["users"]}
+    return proposal_public(proposal, users_by_id, current_user)
+
+
+@app.post("/proposals/{proposal_id}/vote", response_model=ProposalOut)
+def vote_proposal(
+    proposal_id: int,
+    data: ProposalVoteCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    store = load_data()
+    proposal = find_proposal(store, proposal_id)
+
+    if proposal.get("status") == "closed":
+        raise HTTPException(status_code=400, detail="Closed proposals do not accept votes")
+    if proposal["creator_user_id"] == current_user["id"]:
+        raise HTTPException(status_code=403, detail="Proposal creators cannot vote on their own proposals")
+
+    vote = next((item for item in proposal["votes"] if item["user_id"] == current_user["id"]), None)
+    if vote:
+        vote["vote"] = data.vote
+    else:
+        proposal["votes"].append({"user_id": current_user["id"], "vote": data.vote})
+    save_data(store)
+
+    users_by_id = {u["id"]: u for u in store["users"]}
+    return proposal_public(proposal, users_by_id, current_user)
+
+
+@app.post("/proposals/{proposal_id}/close", response_model=ProposalOut)
+def close_proposal(proposal_id: int, current_user: dict = Depends(get_current_user)):
+    store = load_data()
+    proposal = find_proposal(store, proposal_id)
+    require_proposal_manager(proposal, current_user)
+
+    if proposal.get("status") != "closed":
+        proposal["status"] = "closed"
+        proposal["closed_at"] = now_iso()
+        save_data(store)
+
+    users_by_id = {u["id"]: u for u in store["users"]}
+    return proposal_public(proposal, users_by_id, current_user)
+
+
+@app.delete("/proposals/{proposal_id}")
+def delete_proposal(proposal_id: int, current_user: dict = Depends(get_current_user)):
+    store = load_data()
+    proposal = find_proposal(store, proposal_id)
+    require_proposal_manager(proposal, current_user)
+
+    store["proposals"] = [item for item in store["proposals"] if item["id"] != proposal_id]
     save_data(store)
     return {"deleted": True}
 

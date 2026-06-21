@@ -8,7 +8,10 @@ MVP aplikacji do planowania eventów.
 - Użytkownicy tworzą konta
 - Każdy dodaje terminy, kiedy nie może
 - Kalendarz pokazuje wspólne zajęte terminy
+- Użytkownicy tworzą propozycje dat spotkań/wyjazdów i głosują za albo przeciw
 - Administrator może dodawać, edytować i usuwać terminy wszystkich użytkowników
+- Administrator może tworzyć, edytować i usuwać konta użytkowników
+- Wszyscy zalogowani widzą listę użytkowników
 
 ## Uruchomienie backendu
 

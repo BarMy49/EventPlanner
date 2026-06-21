@@ -3,8 +3,10 @@ import { createRoot } from 'react-dom/client';
 import {
   CalendarDays,
   CalendarRange,
+  Check,
   ChevronLeft,
   ChevronRight,
+  LockKeyhole,
   Pencil,
   LogOut,
   Moon,
@@ -12,6 +14,7 @@ import {
   Save,
   Sun,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import './style.css';
@@ -100,6 +103,32 @@ function getUsersForDate(slots, date) {
   return [...users].sort();
 }
 
+function proposalCalendarStatus(proposal) {
+  if (proposal.status === 'open') {
+    return 'pending';
+  }
+
+  if (proposal.status === 'closed' && proposal.results?.yes_count > proposal.results?.no_count) {
+    return 'accepted';
+  }
+
+  return null;
+}
+
+function getProposalsForDate(proposals, date) {
+  const dayStart = startOfDay(date);
+  const dayEnd = addDays(dayStart, 1);
+
+  return proposals
+    .map((proposal) => ({ ...proposal, calendarStatus: proposalCalendarStatus(proposal) }))
+    .filter((proposal) => (
+      proposal.calendarStatus
+      && new Date(proposal.start_time) < dayEnd
+      && new Date(proposal.end_time) > dayStart
+    ))
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+}
+
 function displayEndDate(endTime) {
   const end = new Date(endTime);
   if (
@@ -148,6 +177,26 @@ function buildBusyPayload(startValue, endValue, userId) {
   return payload;
 }
 
+function buildProposalPayload(titleValue, startValue, endValue) {
+  const title = titleValue.trim();
+  if (!title) {
+    throw new Error('Podaj nazwę propozycji.');
+  }
+
+  const payload = buildBusyPayload(startValue, endValue);
+  return {
+    title,
+    start_time: payload.start_time,
+    end_time: payload.end_time,
+  };
+}
+
+function voteLabel(vote) {
+  if (vote === 'yes') return 'za';
+  if (vote === 'no') return 'przeciw';
+  return '';
+}
+
 function getInitialTheme() {
   const saved = localStorage.getItem('theme');
   if (saved) return saved;
@@ -181,7 +230,7 @@ function ThemeToggle({ theme, onToggle }) {
   );
 }
 
-function MonthCalendar({ visibleDate, slots }) {
+function MonthCalendar({ visibleDate, slots, proposals }) {
   const today = startOfDay(new Date());
   const days = useMemo(() => getMonthDays(visibleDate), [visibleDate]);
 
@@ -193,11 +242,14 @@ function MonthCalendar({ visibleDate, slots }) {
       <div className="month-grid">
         {days.map((day) => {
           const users = getUsersForDate(slots, day);
+          const dayProposals = getProposalsForDate(proposals, day);
           const outside = day.getMonth() !== visibleDate.getMonth();
           const className = [
             'day-cell',
             outside ? 'outside-month' : '',
             users.length ? 'busy-day' : '',
+            dayProposals.some((proposal) => proposal.calendarStatus === 'pending') ? 'proposal-pending-day' : '',
+            dayProposals.some((proposal) => proposal.calendarStatus === 'accepted') ? 'proposal-accepted-day' : '',
             isSameDay(day, today) ? 'today' : '',
           ].filter(Boolean).join(' ');
 
@@ -207,6 +259,19 @@ function MonthCalendar({ visibleDate, slots }) {
               {users.length > 0 && (
                 <div className="busy-users">
                   {users.map((user) => <span key={user}>{user}</span>)}
+                </div>
+              )}
+              {dayProposals.length > 0 && (
+                <div className="calendar-proposals">
+                  {dayProposals.map((proposal) => (
+                    <span
+                      className={`calendar-proposal ${proposal.calendarStatus}`}
+                      key={proposal.id}
+                      title={`${proposal.title}: ${formatSlotDateRange(proposal)}`}
+                    >
+                      {proposal.title}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -282,18 +347,30 @@ function App() {
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState('login');
   const [busy, setBusy] = useState([]);
+  const [proposals, setProposals] = useState([]);
   const [message, setMessage] = useState('');
   const [visibleDate, setVisibleDate] = useState(startOfDay(new Date()));
   const [calendarView, setCalendarView] = useState('month');
+  const [leftPanel, setLeftPanel] = useState('slots');
   const [mobilePanel, setMobilePanel] = useState('slots');
   const [theme, setTheme] = useState(getInitialTheme);
   const [start, setStart] = useState(toDateInputValue(new Date()));
   const [end, setEnd] = useState(toDateInputValue(new Date()));
+  const [proposalTitle, setProposalTitle] = useState('');
+  const [proposalStart, setProposalStart] = useState(toDateInputValue(new Date()));
+  const [proposalEnd, setProposalEnd] = useState(toDateInputValue(new Date()));
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserIsAdmin, setNewUserIsAdmin] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [editingSlotId, setEditingSlotId] = useState(null);
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
   const [editUserId, setEditUserId] = useState('');
+  const [editingManagedUserId, setEditingManagedUserId] = useState(null);
+  const [editManagedUsername, setEditManagedUsername] = useState('');
+  const [editManagedPassword, setEditManagedPassword] = useState('');
+  const [editManagedIsAdmin, setEditManagedIsAdmin] = useState(false);
   const themeAnimationTimer = useRef(null);
 
   useEffect(() => {
@@ -364,17 +441,18 @@ function App() {
     const headers = authHeaders(authToken);
     const meData = await api('/users/me', { headers });
     const busyData = await api('/busy', { headers });
+    const proposalsData = await api('/proposals', { headers });
+    const usersData = await api('/users', { headers });
     setCurrentUser(meData);
     setBusy(busyData);
+    setProposals(proposalsData);
+    setUsers(usersData);
 
     if (meData.is_admin) {
-      const usersData = await api('/users', { headers });
-      setUsers(usersData);
       setSelectedUserId((previous) => (
         usersData.some((user) => String(user.id) === previous) ? previous : String(meData.id)
       ));
     } else {
-      setUsers([]);
       setSelectedUserId('');
     }
   }
@@ -388,8 +466,10 @@ function App() {
         setCurrentUser(null);
         setUsers([]);
         setBusy([]);
+        setProposals([]);
         setSelectedUserId('');
         cancelEditing();
+        cancelManagedUserEditing();
       }
       setMessage(err.message);
     });
@@ -408,6 +488,139 @@ function App() {
         headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
         body: JSON.stringify(payload),
       });
+      await loadData();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  async function addProposal(e) {
+    e.preventDefault();
+    setMessage('');
+    try {
+      const payload = buildProposalPayload(proposalTitle, proposalStart, proposalEnd);
+      await api('/proposals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+        body: JSON.stringify(payload),
+      });
+      setProposalTitle('');
+      await loadData();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  async function voteProposal(id, vote) {
+    setMessage('');
+    try {
+      await api(`/proposals/${id}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+        body: JSON.stringify({ vote }),
+      });
+      await loadData();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  async function closeProposal(id) {
+    setMessage('');
+    try {
+      await api(`/proposals/${id}/close`, {
+        method: 'POST',
+        headers: authHeaders(token),
+      });
+      await loadData();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  async function deleteProposal(id) {
+    setMessage('');
+    try {
+      await api(`/proposals/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(token),
+      });
+      await loadData();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  async function createManagedUser(e) {
+    e.preventDefault();
+    setMessage('');
+    try {
+      await api('/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+        body: JSON.stringify({
+          username: newUserUsername.trim(),
+          password: newUserPassword,
+          is_admin: newUserIsAdmin,
+        }),
+      });
+      setNewUserUsername('');
+      setNewUserPassword('');
+      setNewUserIsAdmin(false);
+      await loadData();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  function startEditingManagedUser(user) {
+    setMessage('');
+    setEditingManagedUserId(user.id);
+    setEditManagedUsername(user.username);
+    setEditManagedPassword('');
+    setEditManagedIsAdmin(Boolean(user.is_admin));
+  }
+
+  function cancelManagedUserEditing() {
+    setEditingManagedUserId(null);
+    setEditManagedUsername('');
+    setEditManagedPassword('');
+    setEditManagedIsAdmin(false);
+  }
+
+  async function updateManagedUser(id) {
+    setMessage('');
+    try {
+      const payload = {
+        username: editManagedUsername.trim(),
+        is_admin: editManagedIsAdmin,
+      };
+      if (editManagedPassword) {
+        payload.password = editManagedPassword;
+      }
+
+      await api(`/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+        body: JSON.stringify(payload),
+      });
+      cancelManagedUserEditing();
+      await loadData();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
+
+  async function deleteManagedUser(id) {
+    setMessage('');
+    try {
+      await api(`/users/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(token),
+      });
+      if (editingManagedUserId === id) {
+        cancelManagedUserEditing();
+      }
       await loadData();
     } catch (err) {
       setMessage(err.message);
@@ -467,8 +680,10 @@ function App() {
     setCurrentUser(null);
     setUsers([]);
     setBusy([]);
+    setProposals([]);
     setSelectedUserId('');
     cancelEditing();
+    cancelManagedUserEditing();
   }
 
   function navigateCalendar(direction) {
@@ -487,6 +702,9 @@ function App() {
     : YEAR_FORMATTER.format(visibleDate);
   const isAdmin = Boolean(currentUser?.is_admin);
   const canManageSlot = (slot) => isAdmin || slot.user_id === currentUser?.id;
+  const canVoteProposal = (proposal) => (
+    proposal.status === 'open' && proposal.creator_user_id !== currentUser?.id
+  );
 
   if (!token) {
     return <main className="auth-page">
@@ -561,6 +779,22 @@ function App() {
       </button>
       <button
         type="button"
+        className={mobilePanel === 'proposals' ? 'toggle active' : 'toggle'}
+        onClick={() => setMobilePanel('proposals')}
+        aria-pressed={mobilePanel === 'proposals'}
+      >
+        <CalendarRange size={18}/> Propozycje
+      </button>
+      <button
+        type="button"
+        className={mobilePanel === 'users' ? 'toggle active' : 'toggle'}
+        onClick={() => setMobilePanel('users')}
+        aria-pressed={mobilePanel === 'users'}
+      >
+        <Users size={18}/> Użytkownicy
+      </button>
+      <button
+        type="button"
         className={mobilePanel === 'calendar' ? 'toggle active' : 'toggle'}
         onClick={() => setMobilePanel('calendar')}
         aria-pressed={mobilePanel === 'calendar'}
@@ -570,8 +804,34 @@ function App() {
     </div>
 
     <section className="layout">
-      <aside className={`card slots-card ${mobilePanel === 'slots' ? 'mobile-active' : ''}`}>
-        <h2>Dodaj zajęty termin</h2>
+      <div className={isAdmin ? 'side-column admin-side-column' : 'side-column'}>
+      <div className="side-tabs" role="group" aria-label="Lewy panel">
+        <button
+          type="button"
+          className={leftPanel === 'slots' ? 'toggle active' : 'toggle'}
+          onClick={() => setLeftPanel('slots')}
+          aria-pressed={leftPanel === 'slots'}
+        >
+          <Plus size={18}/> Zajęte
+        </button>
+        <button
+          type="button"
+          className={leftPanel === 'proposals' ? 'toggle active' : 'toggle'}
+          onClick={() => setLeftPanel('proposals')}
+          aria-pressed={leftPanel === 'proposals'}
+        >
+          <CalendarRange size={18}/> Propozycje
+        </button>
+        <button
+          type="button"
+          className={leftPanel === 'users' ? 'toggle active' : 'toggle'}
+          onClick={() => setLeftPanel('users')}
+          aria-pressed={leftPanel === 'users'}
+        >
+          <Users size={18}/> Użytkownicy
+        </button>
+      </div>
+      <aside className={`card slots-card side-card ${leftPanel === 'slots' ? 'desktop-active' : ''} ${mobilePanel === 'slots' ? 'mobile-active' : ''}`}>
         <form onSubmit={addBusy} className="slot-form">
           {isAdmin && (
             <label>
@@ -590,7 +850,6 @@ function App() {
           <button><Plus size={18}/> Dodaj</button>
         </form>
 
-        <h2>{isAdmin ? 'Wszystkie wpisy' : 'Moje / wszystkie wpisy'}</h2>
         <div className="slot-list">
           {busy.map(s => <div className="slot-item" key={s.id}>
             {editingSlotId === s.id ? (
@@ -629,6 +888,211 @@ function App() {
         </div>
       </aside>
 
+      <section className={`card proposals-card side-card ${leftPanel === 'proposals' ? 'desktop-active' : ''} ${mobilePanel === 'proposals' ? 'mobile-active' : ''}`}>
+        <form onSubmit={addProposal} className="proposal-form">
+          <label>
+            Nazwa
+            <input
+              value={proposalTitle}
+              onChange={e => setProposalTitle(e.target.value)}
+              placeholder="Spotkanie lub wyjazd"
+              minLength={3}
+              maxLength={120}
+              required
+            />
+          </label>
+          <label>Od<input type="date" value={proposalStart} onChange={e => setProposalStart(e.target.value)} required /></label>
+          <label>Do<input type="date" value={proposalEnd} onChange={e => setProposalEnd(e.target.value)} required /></label>
+          <button><Plus size={18}/> Dodaj propozycję</button>
+        </form>
+
+        <div className="proposal-list">
+          {proposals.length === 0 && <p className="empty-state">Brak propozycji.</p>}
+          {proposals.map((proposal) => (
+            <article className={`proposal-item ${proposal.status}`} key={proposal.id}>
+              <div className="proposal-head">
+                <div>
+                  <b>{proposal.title}</b>
+                  <span>{formatSlotDateRange(proposal)}</span>
+                  <small>Autor: {proposal.creator_username}</small>
+                </div>
+                <span className={`status-pill ${proposal.status}`}>
+                  {proposal.status === 'closed' ? 'Zamknięta' : 'Otwarta'}
+                </span>
+              </div>
+
+              {proposal.status === 'open' && proposal.my_vote && (
+                <p className="proposal-vote-note">Twój głos: {voteLabel(proposal.my_vote)}</p>
+              )}
+
+              {canVoteProposal(proposal) && (
+                <div className="proposal-votes">
+                  <button
+                    type="button"
+                    className={proposal.my_vote === 'yes' ? 'vote-yes active' : 'vote-yes'}
+                    onClick={() => voteProposal(proposal.id, 'yes')}
+                  >
+                    <Check size={16}/> Za
+                  </button>
+                  <button
+                    type="button"
+                    className={proposal.my_vote === 'no' ? 'secondary vote-no active' : 'secondary vote-no'}
+                    onClick={() => voteProposal(proposal.id, 'no')}
+                  >
+                    <X size={16}/> Przeciw
+                  </button>
+                </div>
+              )}
+
+              {proposal.status === 'closed' && proposal.results && (
+                <div className="proposal-results">
+                  <div className="result-row">
+                    <span>Za</span>
+                    <div className="result-bar yes"><i style={{ width: `${proposal.results.yes_percent}%` }} /></div>
+                    <strong>{proposal.results.yes_count} ({proposal.results.yes_percent}%)</strong>
+                  </div>
+                  <div className="result-row">
+                    <span>Przeciw</span>
+                    <div className="result-bar no"><i style={{ width: `${proposal.results.no_percent}%` }} /></div>
+                    <strong>{proposal.results.no_count} ({proposal.results.no_percent}%)</strong>
+                  </div>
+                </div>
+              )}
+
+              {proposal.can_manage && (
+                <div className="proposal-actions">
+                  {proposal.status === 'open' && (
+                    <button type="button" className="secondary" onClick={() => closeProposal(proposal.id)}>
+                      <LockKeyhole size={16}/> Zamknij
+                    </button>
+                  )}
+                  <button type="button" className="icon action-icon" onClick={() => deleteProposal(proposal.id)} title="Usuń propozycję">
+                    <Trash2 size={16}/>
+                  </button>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className={`card admin-users-card side-card ${leftPanel === 'users' ? 'desktop-active' : ''} ${mobilePanel === 'users' ? 'mobile-active' : ''}`}>
+          {isAdmin && (
+            <form onSubmit={createManagedUser} className="user-form">
+              <label>
+                Nazwa
+                <input
+                  value={newUserUsername}
+                  onChange={e => setNewUserUsername(e.target.value)}
+                  placeholder="Nazwa użytkownika"
+                  minLength={3}
+                  maxLength={80}
+                  required
+                />
+              </label>
+              <label>
+                Hasło
+                <input
+                  type="password"
+                  value={newUserPassword}
+                  onChange={e => setNewUserPassword(e.target.value)}
+                  minLength={6}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  required
+                />
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={newUserIsAdmin}
+                  onChange={e => setNewUserIsAdmin(e.target.checked)}
+                />
+                Admin
+              </label>
+              <button><Plus size={18}/> Dodaj użytkownika</button>
+            </form>
+          )}
+
+          <div className="user-list">
+            {users.map((user) => {
+              const editingUser = editingManagedUserId === user.id;
+              const isCurrentUser = user.id === currentUser?.id;
+
+              return (
+                <article className="user-item" key={user.id}>
+                  {isAdmin && editingUser ? (
+                    <div className="user-edit">
+                      <label>
+                        Nazwa
+                        <input
+                          value={editManagedUsername}
+                          onChange={e => setEditManagedUsername(e.target.value)}
+                          minLength={3}
+                          maxLength={80}
+                          disabled={isCurrentUser}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Nowe hasło
+                        <input
+                          type="password"
+                          value={editManagedPassword}
+                          onChange={e => setEditManagedPassword(e.target.value)}
+                          minLength={6}
+                          maxLength={128}
+                          placeholder="Bez zmiany"
+                          autoComplete="new-password"
+                        />
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={editManagedIsAdmin}
+                          onChange={e => setEditManagedIsAdmin(e.target.checked)}
+                          disabled={isCurrentUser}
+                        />
+                        Admin
+                      </label>
+                      <div className="user-actions">
+                        <button type="button" className="secondary" onClick={cancelManagedUserEditing}><X size={16}/> Anuluj</button>
+                        <button type="button" onClick={() => updateManagedUser(user.id)}><Save size={16}/> Zapisz</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="user-summary">
+                        <div>
+                          <b>{user.username}</b>
+                          {isCurrentUser && <small>To Ty</small>}
+                        </div>
+                        {user.is_admin && <span className="role-pill">Admin</span>}
+                      </div>
+                      {isAdmin && (
+                        <div className="user-actions">
+                          <button type="button" className="secondary action-icon" onClick={() => startEditingManagedUser(user)} title="Edytuj użytkownika">
+                            <Pencil size={16}/>
+                          </button>
+                          <button
+                            type="button"
+                            className="icon action-icon"
+                            onClick={() => deleteManagedUser(user.id)}
+                            title="Usuń użytkownika"
+                            disabled={isCurrentUser}
+                          >
+                            <Trash2 size={16}/>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
       <section className={`card calendar-card calendar-${calendarView}-view ${mobilePanel === 'calendar' ? 'mobile-active' : ''}`}>
         <div className="calendar-nav">
           <div className="nav-group">
@@ -664,7 +1128,7 @@ function App() {
         </div>
 
         {calendarView === 'month'
-          ? <MonthCalendar visibleDate={visibleDate} slots={busy} />
+          ? <MonthCalendar visibleDate={visibleDate} slots={busy} proposals={proposals} />
           : <YearCalendar visibleDate={visibleDate} slots={busy} onOpenMonth={openMonth} />}
       </section>
     </section>

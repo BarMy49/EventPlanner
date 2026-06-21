@@ -10,19 +10,29 @@ _LOCK = Lock()
 DEFAULT_DATA = {
     "next_user_id": 1,
     "next_slot_id": 1,
+    "next_proposal_id": 1,
     "users": [],
     "busy_slots": [],
+    "proposals": [],
 }
 
 
 def normalize_data(data: dict[str, Any]) -> dict[str, Any]:
     data.setdefault("next_user_id", 1)
     data.setdefault("next_slot_id", 1)
+    data.setdefault("next_proposal_id", 1)
     data.setdefault("users", [])
     data.setdefault("busy_slots", [])
+    data.setdefault("proposals", [])
 
     for user in data["users"]:
         user.setdefault("is_admin", user.get("username") == "admin")
+
+    for proposal in data["proposals"]:
+        proposal.setdefault("status", "open")
+        proposal.setdefault("votes", [])
+        proposal.setdefault("created_at", "1970-01-01T00:00:00")
+        proposal.setdefault("closed_at", None)
 
     return data
 
