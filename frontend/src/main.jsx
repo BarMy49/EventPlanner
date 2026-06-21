@@ -158,6 +158,19 @@ function authHeaders(token) {
   return { Authorization: `Bearer ${token}` };
 }
 
+function formatApiError(err) {
+  if (Array.isArray(err.detail)) {
+    return err.detail
+      .map((detail) => {
+        const field = Array.isArray(detail.loc) ? detail.loc[detail.loc.length - 1] : '';
+        return field ? `${field}: ${detail.msg}` : detail.msg;
+      })
+      .join(' ');
+  }
+
+  return err.detail || err.message || 'Błąd API';
+}
+
 function ThemeToggle({ theme, onToggle }) {
   const isDark = theme === 'dark';
   return (
@@ -306,7 +319,9 @@ function App() {
     const res = await fetch(`${API}${path}`, options);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || 'Błąd API');
+      const error = new Error(formatApiError(err));
+      error.status = res.status;
+      throw error;
     }
     return res.json();
   }
@@ -314,32 +329,39 @@ function App() {
   async function submitAuth(e) {
     e.preventDefault();
     setMessage('');
+    const cleanUsername = username.trim();
     try {
       if (mode === 'register') {
         await api('/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username: cleanUsername, password }),
         });
       }
       const form = new URLSearchParams();
-      form.append('username', username);
+      form.append('username', cleanUsername);
       form.append('password', password);
       const data = await api('/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: form,
       });
+      if (!data.access_token) {
+        throw new Error('Logowanie nie zwróciło tokena dostępu.');
+      }
+      await loadData(data.access_token);
       localStorage.setItem('token', data.access_token);
       setToken(data.access_token);
     } catch (err) {
+      localStorage.removeItem('token');
+      setToken('');
       setMessage(err.message);
     }
   }
 
-  async function loadData() {
-    if (!token) return;
-    const headers = authHeaders(token);
+  async function loadData(authToken = token) {
+    if (!authToken) return;
+    const headers = authHeaders(authToken);
     const meData = await api('/users/me', { headers });
     const busyData = await api('/busy', { headers });
     setCurrentUser(meData);
@@ -358,7 +380,19 @@ function App() {
   }
 
   useEffect(() => {
-    loadData().catch((err) => setMessage(err.message));
+    if (!token) return;
+    loadData(token).catch((err) => {
+      if (err.status === 401 || err.status === 403) {
+        localStorage.removeItem('token');
+        setToken('');
+        setCurrentUser(null);
+        setUsers([]);
+        setBusy([]);
+        setSelectedUserId('');
+        cancelEditing();
+      }
+      setMessage(err.message);
+    });
   }, [token]);
 
   async function addBusy(e) {
@@ -464,8 +498,25 @@ function App() {
         <div className="logo"><CalendarDays /> Event Planner</div>
         <h1>{mode === 'login' ? 'Logowanie' : 'Rejestracja'}</h1>
         <form onSubmit={submitAuth}>
-          <input placeholder="Nazwa użytkownika" value={username} onChange={e => setUsername(e.target.value)} />
-          <input placeholder="Hasło" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+          <input
+            placeholder="Nazwa użytkownika"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            minLength={3}
+            maxLength={80}
+            autoComplete="username"
+            required
+          />
+          <input
+            placeholder="Hasło"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            minLength={6}
+            maxLength={128}
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            required
+          />
           <button>{mode === 'login' ? 'Zaloguj' : 'Utwórz konto'}</button>
         </form>
         <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
