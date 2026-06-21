@@ -272,6 +272,7 @@ function App() {
   const [message, setMessage] = useState('');
   const [visibleDate, setVisibleDate] = useState(startOfDay(new Date()));
   const [calendarView, setCalendarView] = useState('month');
+  const [mobilePanel, setMobilePanel] = useState('slots');
   const [theme, setTheme] = useState(getInitialTheme);
   const [start, setStart] = useState(toDateInputValue(new Date()));
   const [end, setEnd] = useState(toDateInputValue(new Date()));
@@ -498,8 +499,27 @@ function App() {
 
     {message && <p className="error">{message}</p>}
 
+    <div className="mobile-tabs" role="group" aria-label="Widok aplikacji">
+      <button
+        type="button"
+        className={mobilePanel === 'slots' ? 'toggle active' : 'toggle'}
+        onClick={() => setMobilePanel('slots')}
+        aria-pressed={mobilePanel === 'slots'}
+      >
+        <Plus size={18}/> Terminy
+      </button>
+      <button
+        type="button"
+        className={mobilePanel === 'calendar' ? 'toggle active' : 'toggle'}
+        onClick={() => setMobilePanel('calendar')}
+        aria-pressed={mobilePanel === 'calendar'}
+      >
+        <CalendarDays size={18}/> Kalendarz
+      </button>
+    </div>
+
     <section className="layout">
-      <aside className="card">
+      <aside className={`card slots-card ${mobilePanel === 'slots' ? 'mobile-active' : ''}`}>
         <h2>Dodaj zajęty termin</h2>
         <form onSubmit={addBusy} className="slot-form">
           {isAdmin && (
@@ -558,7 +578,7 @@ function App() {
         </div>
       </aside>
 
-      <section className="card calendar-card">
+      <section className={`card calendar-card ${mobilePanel === 'calendar' ? 'mobile-active' : ''}`}>
         <div className="calendar-nav">
           <div className="nav-group">
             <button type="button" className="secondary icon-label" onClick={() => navigateCalendar(-1)}>
