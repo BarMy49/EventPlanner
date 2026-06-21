@@ -103,7 +103,12 @@ def resolve_target_user_id(user_id: int | None, current_user: dict, store: dict,
 
 
 def proposal_results(proposal: dict) -> dict:
-    votes = proposal.get("votes", [])
+    participant_ids = set(proposal.get("participant_user_ids", []))
+    votes = [
+        vote
+        for vote in proposal.get("votes", [])
+        if vote.get("user_id") in participant_ids
+    ]
     yes_count = sum(1 for vote in votes if vote.get("vote") == "yes")
     no_count = sum(1 for vote in votes if vote.get("vote") == "no")
     total_votes = yes_count + no_count
@@ -117,10 +122,70 @@ def proposal_results(proposal: dict) -> dict:
     }
 
 
+def proposal_participants(proposal: dict, users_by_id: dict[int, dict]) -> list[UserOut]:
+    participants = []
+    for user_id in proposal.get("participant_user_ids", []):
+        user = users_by_id.get(user_id)
+        if user:
+            participants.append(user_public(user))
+    return participants
+
+
+def proposal_visible_to_user(proposal: dict, current_user: dict) -> bool:
+    return (
+        is_admin(current_user)
+        or proposal["creator_user_id"] == current_user["id"]
+        or current_user["id"] in proposal.get("participant_user_ids", [])
+    )
+
+
+def close_proposal_record(proposal: dict) -> None:
+    proposal["status"] = "closed"
+    proposal["closed_at"] = now_iso()
+
+
+def close_proposal_if_all_voted(proposal: dict) -> None:
+    if proposal.get("status") == "closed":
+        return
+
+    participant_ids = set(proposal.get("participant_user_ids", []))
+    voter_ids = {
+        vote.get("user_id")
+        for vote in proposal.get("votes", [])
+        if vote.get("user_id") in participant_ids
+    }
+    if participant_ids and participant_ids <= voter_ids:
+        close_proposal_record(proposal)
+
+
+def resolve_participant_user_ids(store: dict, participant_user_ids: list[int], current_user: dict) -> list[int]:
+    participant_ids = []
+    for user_id in participant_user_ids:
+        if user_id not in participant_ids:
+            participant_ids.append(user_id)
+
+    if not participant_ids:
+        raise HTTPException(status_code=400, detail="Choose at least one event participant")
+    if current_user["id"] in participant_ids:
+        raise HTTPException(status_code=400, detail="Event creator cannot be a participant")
+
+    existing_user_ids = {user["id"] for user in store["users"]}
+    missing_user_ids = [user_id for user_id in participant_ids if user_id not in existing_user_ids]
+    if missing_user_ids:
+        raise HTTPException(status_code=404, detail="Participant user not found")
+
+    return participant_ids
+
+
 def proposal_public(proposal: dict, users_by_id: dict[int, dict], current_user: dict) -> ProposalOut:
     creator = users_by_id.get(proposal["creator_user_id"])
+    participant_ids = set(proposal.get("participant_user_ids", []))
     my_vote = next(
-        (vote.get("vote") for vote in proposal.get("votes", []) if vote.get("user_id") == current_user["id"]),
+        (
+            vote.get("vote")
+            for vote in proposal.get("votes", [])
+            if vote.get("user_id") == current_user["id"] and current_user["id"] in participant_ids
+        ),
         None,
     )
     can_manage = proposal["creator_user_id"] == current_user["id"] or is_admin(current_user)
@@ -136,8 +201,10 @@ def proposal_public(proposal: dict, users_by_id: dict[int, dict], current_user: 
         status=status_value,
         created_at=datetime.fromisoformat(proposal["created_at"]),
         closed_at=datetime.fromisoformat(proposal["closed_at"]) if proposal.get("closed_at") else None,
+        participants=proposal_participants(proposal, users_by_id),
         my_vote=my_vote,
         can_manage=can_manage,
+        can_close=is_admin(current_user) and status_value == "open",
         results=proposal_results(proposal) if status_value == "closed" else None,
     )
 
@@ -145,13 +212,18 @@ def proposal_public(proposal: dict, users_by_id: dict[int, dict], current_user: 
 def find_proposal(store: dict, proposal_id: int) -> dict:
     proposal = next((item for item in store["proposals"] if item["id"] == proposal_id), None)
     if not proposal:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+        raise HTTPException(status_code=404, detail="Event proposal not found")
     return proposal
 
 
 def require_proposal_manager(proposal: dict, current_user: dict) -> None:
     if proposal["creator_user_id"] != current_user["id"] and not is_admin(current_user):
-        raise HTTPException(status_code=403, detail="Only the creator or admin can manage this proposal")
+        raise HTTPException(status_code=403, detail="Only the creator or admin can manage this event")
+
+
+def require_proposal_closer(current_user: dict) -> None:
+    if not is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only admins can close event proposals")
 
 
 def ensure_admin_user() -> None:
@@ -306,7 +378,19 @@ def delete_user_by_admin(user_id: int, current_user: dict = Depends(get_current_
         if proposal["creator_user_id"] != user_id
     ]
     for proposal in store["proposals"]:
-        proposal["votes"] = [vote for vote in proposal.get("votes", []) if vote.get("user_id") != user_id]
+        proposal["participant_user_ids"] = [
+            participant_id
+            for participant_id in proposal.get("participant_user_ids", [])
+            if participant_id != user_id
+        ]
+        participant_ids = set(proposal["participant_user_ids"])
+        proposal["votes"] = [
+            vote
+            for vote in proposal.get("votes", [])
+            if vote.get("user_id") in participant_ids
+        ]
+        if not participant_ids and proposal.get("status") != "closed":
+            close_proposal_record(proposal)
 
     save_data(store)
     return {"deleted": True}
@@ -381,7 +465,7 @@ def list_proposals(current_user: dict = Depends(get_current_user)):
     store = load_data()
     users_by_id = {u["id"]: u for u in store["users"]}
     proposals = sorted(
-        store["proposals"],
+        [proposal for proposal in store["proposals"] if proposal_visible_to_user(proposal, current_user)],
         key=lambda proposal: (
             proposal.get("status") == "closed",
             proposal["start_time"],
@@ -395,17 +479,19 @@ def list_proposals(current_user: dict = Depends(get_current_user)):
 def create_proposal(data: ProposalCreate, current_user: dict = Depends(get_current_user)):
     title = data.title.strip()
     if not title:
-        raise HTTPException(status_code=400, detail="Proposal title is required")
+        raise HTTPException(status_code=400, detail="Event title is required")
     if data.end_time <= data.start_time:
         raise HTTPException(status_code=400, detail="end_time must be after start_time")
 
     store = load_data()
+    participant_user_ids = resolve_participant_user_ids(store, data.participant_user_ids, current_user)
     proposal = {
         "id": store["next_proposal_id"],
         "creator_user_id": current_user["id"],
         "title": title,
         "start_time": data.start_time.isoformat(),
         "end_time": data.end_time.isoformat(),
+        "participant_user_ids": participant_user_ids,
         "status": "open",
         "created_at": now_iso(),
         "closed_at": None,
@@ -429,15 +515,18 @@ def vote_proposal(
     proposal = find_proposal(store, proposal_id)
 
     if proposal.get("status") == "closed":
-        raise HTTPException(status_code=400, detail="Closed proposals do not accept votes")
+        raise HTTPException(status_code=400, detail="Closed event proposals do not accept votes")
     if proposal["creator_user_id"] == current_user["id"]:
-        raise HTTPException(status_code=403, detail="Proposal creators cannot vote on their own proposals")
+        raise HTTPException(status_code=403, detail="Event creators cannot vote on their own proposals")
+    if current_user["id"] not in proposal.get("participant_user_ids", []):
+        raise HTTPException(status_code=403, detail="Only event participants can vote")
 
     vote = next((item for item in proposal["votes"] if item["user_id"] == current_user["id"]), None)
     if vote:
         vote["vote"] = data.vote
     else:
         proposal["votes"].append({"user_id": current_user["id"], "vote": data.vote})
+    close_proposal_if_all_voted(proposal)
     save_data(store)
 
     users_by_id = {u["id"]: u for u in store["users"]}
@@ -448,11 +537,10 @@ def vote_proposal(
 def close_proposal(proposal_id: int, current_user: dict = Depends(get_current_user)):
     store = load_data()
     proposal = find_proposal(store, proposal_id)
-    require_proposal_manager(proposal, current_user)
+    require_proposal_closer(current_user)
 
     if proposal.get("status") != "closed":
-        proposal["status"] = "closed"
-        proposal["closed_at"] = now_iso()
+        close_proposal_record(proposal)
         save_data(store)
 
     users_by_id = {u["id"]: u for u in store["users"]}

@@ -54,6 +54,7 @@ class ProposalCreate(BaseModel):
     title: str = Field(min_length=3, max_length=120)
     start_time: datetime
     end_time: datetime
+    participant_user_ids: list[int] = Field(default_factory=list)
 
 class ProposalVoteCreate(BaseModel):
     vote: Literal["yes", "no"]
@@ -75,6 +76,8 @@ class ProposalOut(BaseModel):
     status: Literal["open", "closed"]
     created_at: datetime
     closed_at: datetime | None = None
+    participants: list[UserOut] = Field(default_factory=list)
     my_vote: Literal["yes", "no"] | None = None
     can_manage: bool = False
+    can_close: bool = False
     results: ProposalResults | None = None

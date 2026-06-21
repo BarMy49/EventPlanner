@@ -6,6 +6,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  List,
   LockKeyhole,
   Pencil,
   LogOut,
@@ -23,6 +24,7 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const DAYS = ['Pon', 'Wt', 'Śr', 'Czw', 'Pt', 'Sob', 'Nd'];
 const SHORT_DAYS = ['P', 'W', 'Ś', 'C', 'P', 'S', 'N'];
 const DATE_FORMATTER = new Intl.DateTimeFormat('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const DAY_NAME_FORMATTER = new Intl.DateTimeFormat('pl-PL', { weekday: 'long' });
 const MONTH_FORMATTER = new Intl.DateTimeFormat('pl-PL', { month: 'long', year: 'numeric' });
 const MONTH_NAME_FORMATTER = new Intl.DateTimeFormat('pl-PL', { month: 'long' });
 const YEAR_FORMATTER = new Intl.DateTimeFormat('pl-PL', { year: 'numeric' });
@@ -85,6 +87,11 @@ function getMonthDays(date) {
   return Array.from({ length: 42 }, (_, i) => addDays(start, i));
 }
 
+function getMonthActualDays(date) {
+  const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  return Array.from({ length: daysInMonth }, (_, day) => new Date(date.getFullYear(), date.getMonth(), day + 1));
+}
+
 function getUsersForDate(slots, date) {
   const dayStart = startOfDay(date);
   const dayEnd = addDays(dayStart, 1);
@@ -103,6 +110,15 @@ function getUsersForDate(slots, date) {
   return [...users].sort();
 }
 
+function getSlotsForDate(slots, date) {
+  const dayStart = startOfDay(date);
+  const dayEnd = addDays(dayStart, 1);
+
+  return slots
+    .filter((slot) => new Date(slot.start_time) < dayEnd && new Date(slot.end_time) > dayStart)
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time) || a.username.localeCompare(b.username));
+}
+
 function proposalCalendarStatus(proposal) {
   if (proposal.status === 'open') {
     return 'pending';
@@ -113,6 +129,29 @@ function proposalCalendarStatus(proposal) {
   }
 
   return null;
+}
+
+function getCalendarItemsForDate(slots, proposals, date) {
+  const busyItems = getSlotsForDate(slots, date).map((slot) => ({
+    id: `busy-${slot.id}`,
+    type: 'busy',
+    start_time: slot.start_time,
+    end_time: slot.end_time,
+    slot,
+  }));
+  const proposalItems = getProposalsForDate(proposals, date).map((proposal) => ({
+    id: `proposal-${proposal.id}`,
+    type: 'proposal',
+    status: proposal.calendarStatus,
+    start_time: proposal.start_time,
+    end_time: proposal.end_time,
+    proposal,
+  }));
+
+  return [...busyItems, ...proposalItems].sort((a, b) => (
+    new Date(a.start_time) - new Date(b.start_time)
+    || a.type.localeCompare(b.type)
+  ));
 }
 
 function getProposalsForDate(proposals, date) {
@@ -177,10 +216,15 @@ function buildBusyPayload(startValue, endValue, userId) {
   return payload;
 }
 
-function buildProposalPayload(titleValue, startValue, endValue) {
+function buildProposalPayload(titleValue, startValue, endValue, participantIds) {
   const title = titleValue.trim();
   if (!title) {
-    throw new Error('Podaj nazwę propozycji.');
+    throw new Error('Podaj nazwę wydarzenia.');
+  }
+
+  const participantUserIds = [...new Set(participantIds.map(Number).filter(Boolean))];
+  if (participantUserIds.length === 0) {
+    throw new Error('Wybierz co najmniej jednego uczestnika wydarzenia.');
   }
 
   const payload = buildBusyPayload(startValue, endValue);
@@ -188,7 +232,16 @@ function buildProposalPayload(titleValue, startValue, endValue) {
     title,
     start_time: payload.start_time,
     end_time: payload.end_time,
+    participant_user_ids: participantUserIds,
   };
+}
+
+function formatProposalParticipants(proposal) {
+  if (!proposal.participants?.length) {
+    return 'Brak uczestników';
+  }
+
+  return proposal.participants.map((participant) => participant.username).join(', ');
 }
 
 function voteLabel(vote) {
@@ -339,6 +392,63 @@ function YearCalendar({ visibleDate, slots, onOpenMonth }) {
   );
 }
 
+function EventsCalendar({ visibleDate, slots, proposals }) {
+  const days = useMemo(
+    () => getMonthActualDays(visibleDate)
+      .map((date) => ({ date, items: getCalendarItemsForDate(slots, proposals, date) }))
+      .filter((day) => day.items.length > 0),
+    [visibleDate, slots, proposals],
+  );
+
+  return (
+    <div className="events-calendar">
+      {days.length === 0 && (
+        <p className="empty-state events-empty">Brak wydarzeń i zajętych terminów w tym miesiącu.</p>
+      )}
+      {days.map((day) => (
+        <section className="events-day" key={day.date.toISOString()}>
+          <div className="events-day-header">
+            <div>
+              <strong>{formatDate(day.date)}</strong>
+              <span>{DAY_NAME_FORMATTER.format(day.date)}</span>
+            </div>
+            <small>Wpisy: {day.items.length}</small>
+          </div>
+          <div className="events-list">
+            {day.items.map((item) => {
+              if (item.type === 'busy') {
+                return (
+                  <article className="calendar-event busy" key={item.id}>
+                    <span className="event-kind busy">Zajęte</span>
+                    <div className="event-details">
+                      <b>{item.slot.username}</b>
+                      <span>{formatSlotDateRange(item.slot)}</span>
+                    </div>
+                  </article>
+                );
+              }
+
+              return (
+                <article className={`calendar-event ${item.status}`} key={item.id}>
+                  <span className={`event-kind ${item.status}`}>
+                    {item.status === 'accepted' ? 'Zaakceptowane' : 'Głosowanie'}
+                  </span>
+                  <div className="event-details">
+                    <b>{item.proposal.title}</b>
+                    <span>{formatSlotDateRange(item.proposal)}</span>
+                    <small>Autor: {item.proposal.creator_username}</small>
+                    <small>Uczestnicy: {formatProposalParticipants(item.proposal)}</small>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || '');
   const [currentUser, setCurrentUser] = useState(null);
@@ -359,6 +469,7 @@ function App() {
   const [proposalTitle, setProposalTitle] = useState('');
   const [proposalStart, setProposalStart] = useState(toDateInputValue(new Date()));
   const [proposalEnd, setProposalEnd] = useState(toDateInputValue(new Date()));
+  const [proposalParticipantIds, setProposalParticipantIds] = useState([]);
   const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserIsAdmin, setNewUserIsAdmin] = useState(false);
@@ -447,6 +558,14 @@ function App() {
     setBusy(busyData);
     setProposals(proposalsData);
     setUsers(usersData);
+    const selectableParticipantIds = new Set(
+      usersData
+        .filter((user) => user.id !== meData.id)
+        .map((user) => String(user.id)),
+    );
+    setProposalParticipantIds((previous) => (
+      previous.filter((userId) => selectableParticipantIds.has(userId))
+    ));
 
     if (meData.is_admin) {
       setSelectedUserId((previous) => (
@@ -467,6 +586,7 @@ function App() {
         setUsers([]);
         setBusy([]);
         setProposals([]);
+        setProposalParticipantIds([]);
         setSelectedUserId('');
         cancelEditing();
         cancelManagedUserEditing();
@@ -498,13 +618,14 @@ function App() {
     e.preventDefault();
     setMessage('');
     try {
-      const payload = buildProposalPayload(proposalTitle, proposalStart, proposalEnd);
+      const payload = buildProposalPayload(proposalTitle, proposalStart, proposalEnd, proposalParticipantIds);
       await api('/proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
         body: JSON.stringify(payload),
       });
       setProposalTitle('');
+      setProposalParticipantIds([]);
       await loadData();
     } catch (err) {
       setMessage(err.message);
@@ -549,6 +670,15 @@ function App() {
     } catch (err) {
       setMessage(err.message);
     }
+  }
+
+  function toggleProposalParticipant(userId) {
+    const participantId = String(userId);
+    setProposalParticipantIds((previous) => (
+      previous.includes(participantId)
+        ? previous.filter((id) => id !== participantId)
+        : [...previous, participantId]
+    ));
   }
 
   async function createManagedUser(e) {
@@ -681,6 +811,7 @@ function App() {
     setUsers([]);
     setBusy([]);
     setProposals([]);
+    setProposalParticipantIds([]);
     setSelectedUserId('');
     cancelEditing();
     cancelManagedUserEditing();
@@ -688,7 +819,7 @@ function App() {
 
   function navigateCalendar(direction) {
     setVisibleDate((date) => (
-      calendarView === 'month' ? addMonths(date, direction) : addYears(date, direction)
+      calendarView === 'year' ? addYears(date, direction) : addMonths(date, direction)
     ));
   }
 
@@ -697,13 +828,16 @@ function App() {
     setCalendarView('month');
   }
 
-  const calendarTitle = calendarView === 'month'
-    ? MONTH_FORMATTER.format(visibleDate)
-    : YEAR_FORMATTER.format(visibleDate);
+  const calendarTitle = calendarView === 'year'
+    ? YEAR_FORMATTER.format(visibleDate)
+    : MONTH_FORMATTER.format(visibleDate);
   const isAdmin = Boolean(currentUser?.is_admin);
+  const proposalParticipantOptions = users.filter((user) => user.id !== currentUser?.id);
   const canManageSlot = (slot) => isAdmin || slot.user_id === currentUser?.id;
   const canVoteProposal = (proposal) => (
-    proposal.status === 'open' && proposal.creator_user_id !== currentUser?.id
+    proposal.status === 'open'
+    && proposal.creator_user_id !== currentUser?.id
+    && proposal.participants?.some((participant) => participant.id === currentUser?.id)
   );
 
   if (!token) {
@@ -748,8 +882,8 @@ function App() {
   return <main className="app">
     <header>
       <div>
-        <h1>Planowanie eventów</h1>
-        <p>Zaznacz kiedy nie możesz. Aplikacja pokazuje zajęte terminy wszystkich osób.</p>
+        <h1>Planowanie wydarzeń</h1>
+        <p>Zaznacz kiedy nie możesz i twórz propozycje wydarzeń dla wybranych uczestników.</p>
         {currentUser && (
           <div className="user-meta">
             {currentUser.username}
@@ -783,7 +917,7 @@ function App() {
         onClick={() => setMobilePanel('proposals')}
         aria-pressed={mobilePanel === 'proposals'}
       >
-        <CalendarRange size={18}/> Propozycje
+        <CalendarRange size={18}/> Wydarzenia
       </button>
       <button
         type="button"
@@ -820,7 +954,7 @@ function App() {
           onClick={() => setLeftPanel('proposals')}
           aria-pressed={leftPanel === 'proposals'}
         >
-          <CalendarRange size={18}/> Propozycje
+          <CalendarRange size={18}/> Wydarzenia
         </button>
         <button
           type="button"
@@ -903,11 +1037,29 @@ function App() {
           </label>
           <label>Od<input type="date" value={proposalStart} onChange={e => setProposalStart(e.target.value)} required /></label>
           <label>Do<input type="date" value={proposalEnd} onChange={e => setProposalEnd(e.target.value)} required /></label>
-          <button><Plus size={18}/> Dodaj propozycję</button>
+          <div className="participant-field">
+            <span>Uczestnicy</span>
+            <div className="participant-options" role="group" aria-label="Uczestnicy wydarzenia">
+              {proposalParticipantOptions.length === 0 && (
+                <span className="participant-empty">Brak dostępnych użytkowników.</span>
+              )}
+              {proposalParticipantOptions.map((user) => (
+                <label className="participant-option" key={user.id}>
+                  <input
+                    type="checkbox"
+                    checked={proposalParticipantIds.includes(String(user.id))}
+                    onChange={() => toggleProposalParticipant(user.id)}
+                  />
+                  <span>{user.username}{user.is_admin ? ' (admin)' : ''}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <button><Plus size={18}/> Dodaj wydarzenie</button>
         </form>
 
         <div className="proposal-list">
-          {proposals.length === 0 && <p className="empty-state">Brak propozycji.</p>}
+          {proposals.length === 0 && <p className="empty-state">Brak wydarzeń.</p>}
           {proposals.map((proposal) => (
             <article className={`proposal-item ${proposal.status}`} key={proposal.id}>
               <div className="proposal-head">
@@ -915,9 +1067,10 @@ function App() {
                   <b>{proposal.title}</b>
                   <span>{formatSlotDateRange(proposal)}</span>
                   <small>Autor: {proposal.creator_username}</small>
+                  <small>Uczestnicy: {formatProposalParticipants(proposal)}</small>
                 </div>
                 <span className={`status-pill ${proposal.status}`}>
-                  {proposal.status === 'closed' ? 'Zamknięta' : 'Otwarta'}
+                  {proposal.status === 'closed' ? 'Zamknięte' : 'Głosowanie'}
                 </span>
               </div>
 
@@ -961,12 +1114,12 @@ function App() {
 
               {proposal.can_manage && (
                 <div className="proposal-actions">
-                  {proposal.status === 'open' && (
+                  {proposal.can_close && (
                     <button type="button" className="secondary" onClick={() => closeProposal(proposal.id)}>
                       <LockKeyhole size={16}/> Zamknij
                     </button>
                   )}
-                  <button type="button" className="icon action-icon" onClick={() => deleteProposal(proposal.id)} title="Usuń propozycję">
+                  <button type="button" className="icon action-icon" onClick={() => deleteProposal(proposal.id)} title="Usuń wydarzenie">
                     <Trash2 size={16}/>
                   </button>
                 </div>
@@ -1113,6 +1266,8 @@ function App() {
               className={calendarView === 'month' ? 'toggle active' : 'toggle'}
               onClick={() => setCalendarView('month')}
               aria-pressed={calendarView === 'month'}
+              aria-label="Widok miesiąca"
+              title="Widok miesiąca"
             >
               <CalendarDays size={18}/> Miesiąc
             </button>
@@ -1121,15 +1276,33 @@ function App() {
               className={calendarView === 'year' ? 'toggle active' : 'toggle'}
               onClick={() => setCalendarView('year')}
               aria-pressed={calendarView === 'year'}
+              aria-label="Widok roku"
+              title="Widok roku"
             >
               <CalendarRange size={18}/> Rok
+            </button>
+            <button
+              type="button"
+              className={calendarView === 'events' ? 'toggle active' : 'toggle'}
+              onClick={() => setCalendarView('events')}
+              aria-pressed={calendarView === 'events'}
+              aria-label="Widok wydarzeń"
+              title="Widok wydarzeń"
+            >
+              <List size={18}/> Wydarzenia
             </button>
           </div>
         </div>
 
-        {calendarView === 'month'
-          ? <MonthCalendar visibleDate={visibleDate} slots={busy} proposals={proposals} />
-          : <YearCalendar visibleDate={visibleDate} slots={busy} onOpenMonth={openMonth} />}
+        {calendarView === 'month' && (
+          <MonthCalendar visibleDate={visibleDate} slots={busy} proposals={proposals} />
+        )}
+        {calendarView === 'year' && (
+          <YearCalendar visibleDate={visibleDate} slots={busy} onOpenMonth={openMonth} />
+        )}
+        {calendarView === 'events' && (
+          <EventsCalendar visibleDate={visibleDate} slots={busy} proposals={proposals} />
+        )}
       </section>
     </section>
   </main>;

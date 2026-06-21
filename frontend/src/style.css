@@ -96,6 +96,8 @@ select,
 .mini-day,
 .busy-users span,
 .calendar-proposal,
+.calendar-event,
+.event-kind,
 .user-meta span {
   transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
 }
@@ -170,7 +172,13 @@ p { color: var(--muted); margin: 0 0 8px; }
 .action-icon { width: 38px; min-height: 38px; padding: 8px; }
 .proposals-card { display: flex; flex-direction: column; overflow: hidden; }
 .proposal-form { flex: 0 0 auto; margin-bottom: 14px; }
-.proposal-form label { font-weight: 800; color: var(--text); }
+.proposal-form label, .participant-field { font-weight: 800; color: var(--text); }
+.participant-field { display: grid; gap: 8px; }
+.participant-options { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.participant-option { display: flex; align-items: center; gap: 8px; min-height: 28px; font-weight: 800; color: var(--text); }
+.participant-option input { width: auto; min-height: auto; margin: 0; accent-color: var(--primary); }
+.participant-option span { min-width: 0; overflow-wrap: anywhere; }
+.participant-empty { color: var(--muted); font-size: 13px; }
 .proposal-list { display: grid; gap: 10px; flex: 1 1 auto; min-height: 0; overflow: visible; align-content: start; padding-right: 2px; }
 .empty-state { margin: 0; padding: 12px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); font-weight: 800; text-align: center; }
 .proposal-item { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); }
@@ -244,6 +252,31 @@ p { color: var(--muted); margin: 0 0 8px; }
 .calendar-proposal.accepted { background: #dcfce7; color: #166534; }
 :root[data-theme='dark'] .calendar-proposal.pending { background: #713f12; color: #fef3c7; }
 :root[data-theme='dark'] .calendar-proposal.accepted { background: #14532d; color: #dcfce7; }
+.events-calendar { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; align-content: start; gap: 14px; padding: 0 6px 8px 0; scrollbar-gutter: stable; }
+.events-empty { margin: 0; }
+.events-day { display: grid; gap: 8px; min-width: 0; }
+.events-day-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.events-day-header > div { display: grid; gap: 2px; min-width: 0; }
+.events-day-header strong { font-size: 16px; font-weight: 900; }
+.events-day-header span { color: var(--muted); font-size: 13px; font-weight: 900; text-transform: capitalize; }
+.events-day-header small { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-weight: 900; }
+.events-list { display: grid; gap: 8px; min-width: 0; }
+.calendar-event { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); }
+.calendar-event.busy { background: var(--busy-bg); border-color: var(--busy-chip); }
+.calendar-event.pending { background: #fffbeb; border-color: #fde68a; }
+.calendar-event.accepted { background: #f0fdf4; border-color: #bbf7d0; }
+:root[data-theme='dark'] .calendar-event.pending { background: #2f2818; border-color: #713f12; }
+:root[data-theme='dark'] .calendar-event.accepted { background: #17281d; border-color: #14532d; }
+.event-kind { border-radius: 999px; padding: 4px 8px; font-size: 12px; font-weight: 900; white-space: nowrap; background: var(--surface-muted); color: var(--muted); }
+.event-kind.busy { background: var(--busy-chip); color: var(--busy-text); }
+.event-kind.pending { background: #fef3c7; color: #92400e; }
+.event-kind.accepted { background: #dcfce7; color: #166534; }
+:root[data-theme='dark'] .event-kind.pending { background: #713f12; color: #fef3c7; }
+:root[data-theme='dark'] .event-kind.accepted { background: #14532d; color: #dcfce7; }
+.event-details { display: grid; gap: 3px; min-width: 0; }
+.event-details b { overflow-wrap: anywhere; }
+.event-details span, .event-details small { color: var(--muted); font-weight: 800; }
+.event-details small { font-size: 12px; }
 .year-calendar { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); grid-auto-rows: max-content; align-content: start; align-items: start; gap: 12px; flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 6px 8px 0; scrollbar-gutter: stable; }
 .mini-month { display: grid; grid-template-rows: auto auto auto; align-self: start; min-width: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
 .mini-month-title { width: 100%; justify-content: flex-start; border-radius: 0; background: var(--surface-soft); color: var(--text); text-transform: capitalize; }
@@ -296,6 +329,8 @@ p { color: var(--muted); margin: 0 0 8px; }
   .mini-day,
   .busy-users span,
   .calendar-proposal,
+  .calendar-event,
+  .event-kind,
   .user-meta span {
     transition: none;
   }
@@ -373,6 +408,7 @@ p { color: var(--muted); margin: 0 0 8px; }
     text-indent: 20px;
   }
   .calendar-year-view.mobile-active { overflow: hidden; }
+  .events-calendar { flex: none; min-height: auto; overflow: visible; padding: 0; }
   .year-calendar { grid-template-columns: repeat(2, minmax(210px, 1fr)); gap: 8px; max-height: calc(100svh - 220px); overflow: auto; padding: 0 4px 8px 0; }
   .mini-grid { grid-template-rows: repeat(6, 28px); }
   .mini-month-title { min-height: 34px; padding: 7px 9px; font-size: 12px; }
@@ -401,6 +437,9 @@ p { color: var(--muted); margin: 0 0 8px; }
   .mobile-tabs .toggle svg { width: 16px; height: 16px; }
   .slot-form input, .slot-form select { margin-bottom: 9px; }
   .slot-item, .proposal-item, .user-item { padding: 10px; }
+  .calendar-event { grid-template-columns: minmax(0, 1fr); }
+  .event-kind { width: max-content; max-width: 100%; white-space: normal; }
+  .events-day-header { align-items: flex-start; }
   .slot-item { flex-direction: column; }
   .slot-item > div:first-child { min-width: 0; overflow-wrap: anywhere; }
   .slot-actions, .proposal-actions, .user-actions { width: 100%; justify-content: flex-end; }
@@ -423,6 +462,14 @@ p { color: var(--muted); margin: 0 0 8px; }
   .view-toggle .toggle {
     gap: 6px;
     padding-inline: 8px;
+  }
+  .view-toggle .toggle {
+    gap: 0;
+    font-size: 0;
+  }
+  .view-toggle .toggle svg {
+    width: 18px;
+    height: 18px;
   }
   .month-grid { grid-template-rows: repeat(6, minmax(46px, auto)); }
   .day-cell { min-height: 46px; padding: 4px; }

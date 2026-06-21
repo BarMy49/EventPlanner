@@ -31,6 +31,15 @@ def normalize_data(data: dict[str, Any]) -> dict[str, Any]:
     for proposal in data["proposals"]:
         proposal.setdefault("status", "open")
         proposal.setdefault("votes", [])
+        participant_user_ids = []
+        for user_id in proposal.get("participant_user_ids", []):
+            try:
+                normalized_user_id = int(user_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_user_id not in participant_user_ids:
+                participant_user_ids.append(normalized_user_id)
+        proposal["participant_user_ids"] = participant_user_ids
         proposal.setdefault("created_at", "1970-01-01T00:00:00")
         proposal.setdefault("closed_at", None)
 
