@@ -197,6 +197,20 @@ function getSlotEndInputValue(slot) {
   return toDateInputValue(displayEndDate(slot.end_time));
 }
 
+function updateRangeStart(nextStart, currentEnd, setStartValue, setEndValue) {
+  setStartValue(nextStart);
+  if (nextStart && currentEnd && currentEnd < nextStart) {
+    setEndValue(nextStart);
+  }
+}
+
+function updateRangeEnd(nextEnd, currentStart, setStartValue, setEndValue) {
+  setEndValue(nextEnd);
+  if (nextEnd && currentStart && currentStart > nextEnd) {
+    setStartValue(nextEnd);
+  }
+}
+
 function buildBusyPayload(startValue, endValue, userId) {
   const startDate = startOfDay(fromDateInputValue(startValue));
   const endDate = addDays(startOfDay(fromDateInputValue(endValue)), 1);
@@ -979,8 +993,8 @@ function App() {
               </select>
             </label>
           )}
-          <label>Od<input type="date" value={start} onChange={e => setStart(e.target.value)} required /></label>
-          <label>Do<input type="date" value={end} onChange={e => setEnd(e.target.value)} required /></label>
+          <label>Od<input type="date" value={start} onChange={e => updateRangeStart(e.target.value, end, setStart, setEnd)} required /></label>
+          <label>Do<input type="date" value={end} onChange={e => updateRangeEnd(e.target.value, start, setStart, setEnd)} required /></label>
           <button><Plus size={18}/> Dodaj</button>
         </form>
 
@@ -1000,8 +1014,8 @@ function App() {
                     </select>
                   </label>
                 )}
-                <label>Od<input type="date" value={editStart} onChange={e => setEditStart(e.target.value)} required /></label>
-                <label>Do<input type="date" value={editEnd} onChange={e => setEditEnd(e.target.value)} required /></label>
+                <label>Od<input type="date" value={editStart} onChange={e => updateRangeStart(e.target.value, editEnd, setEditStart, setEditEnd)} required /></label>
+                <label>Do<input type="date" value={editEnd} onChange={e => updateRangeEnd(e.target.value, editStart, setEditStart, setEditEnd)} required /></label>
                 <div className="slot-actions">
                   <button type="button" className="secondary" onClick={cancelEditing}><X size={16}/> Anuluj</button>
                   <button type="button" onClick={() => updateBusy(s.id)}><Save size={16}/> Zapisz</button>
@@ -1035,8 +1049,8 @@ function App() {
               required
             />
           </label>
-          <label>Od<input type="date" value={proposalStart} onChange={e => setProposalStart(e.target.value)} required /></label>
-          <label>Do<input type="date" value={proposalEnd} onChange={e => setProposalEnd(e.target.value)} required /></label>
+          <label>Od<input type="date" value={proposalStart} onChange={e => updateRangeStart(e.target.value, proposalEnd, setProposalStart, setProposalEnd)} required /></label>
+          <label>Do<input type="date" value={proposalEnd} onChange={e => updateRangeEnd(e.target.value, proposalStart, setProposalStart, setProposalEnd)} required /></label>
           <div className="participant-field">
             <span>Uczestnicy</span>
             <div className="participant-options" role="group" aria-label="Uczestnicy wydarzenia">
