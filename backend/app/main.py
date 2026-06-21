@@ -226,7 +226,10 @@ def me(user: dict = Depends(get_current_user)):
 @app.get("/users", response_model=list[UserOut])
 def list_users(current_user: dict = Depends(get_current_user)):
     store = load_data()
-    users = sorted(store["users"], key=lambda u: u["username"].lower())
+    visible_users = store["users"] if is_admin(current_user) else [
+        user for user in store["users"] if not user.get("is_admin")
+    ]
+    users = sorted(visible_users, key=lambda u: u["username"].lower())
     return [user_public(user) for user in users]
 
 
