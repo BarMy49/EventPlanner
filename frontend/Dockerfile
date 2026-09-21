@@ -13,7 +13,8 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
-RUN apk add --no-cache certbot gettext
+RUN apk add --no-cache certbot gettext \
+    && mkdir -p /var/www/certbot
 
 COPY nginx.http.conf.template nginx.https.conf.template /etc/nginx/templates/
 COPY docker-entrypoint.sh /usr/local/bin/event-planner-entrypoint
