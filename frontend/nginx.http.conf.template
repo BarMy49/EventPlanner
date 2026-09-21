@@ -1,9 +1,15 @@
 server {
     listen 80;
-    server_name _;
+    server_name ${DOMAIN};
 
     root /usr/share/nginx/html;
     index index.html;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+        try_files $uri =404;
+    }
 
     location /api/ {
         proxy_pass http://backend:8000/;
