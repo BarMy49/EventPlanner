@@ -3,11 +3,11 @@ services:
     build:
       context: ./backend
     environment:
-      SECRET_KEY: ${SECRET_KEY:-change-this-secret}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
       DATA_FILE: /data/data.json
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://${DOMAIN:?DOMAIN is required},http://localhost,http://127.0.0.1}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
     volumes:
       - backend-data:/data
 

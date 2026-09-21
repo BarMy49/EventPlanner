@@ -51,7 +51,7 @@ http://localhost
 
 ## Uruchomienie w Dockerze
 
-Skopiuj `.env.example` do `.env` i ustaw `DOMAIN`, `LETSENCRYPT_EMAIL`, `SECRET_KEY` oraz dane administratora. Plik `.env` nie jest śledzony przez Git.
+Skopiuj `.env.example` do `.env` i ustaw wszystkie wartości w tym pliku. `.env` jest jedynym miejscem konfiguracji wdrożenia i nie jest śledzony przez Git; `docker-compose.yml` tylko przekazuje te wartości do kontenerów.
 
 DNS domeny musi wskazywać ten serwer, a porty TCP `80` i `443` muszą być dostępne publicznie. Pierwsze uruchomienie pobierze certyfikat Let's Encrypt, a kontener będzie go odnawiał automatycznie.
 
