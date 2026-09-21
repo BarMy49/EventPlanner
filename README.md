@@ -94,6 +94,28 @@ backend/data.json
 Możesz go usunąć, żeby zresetować użytkowników i terminy.
 W Dockerze dane są trzymane w wolumenie `backend-data`.
 
+## Testy
+
+Testy backendu korzystają z tymczasowego pliku JSON i nie zmieniają `backend/data.json`:
+
+```bash
+cd backend
+python -m pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
+Testy frontendu:
+
+```bash
+cd frontend
+npm install
+npm test
+npx playwright install
+PYTHON=../.venv/Scripts/python.exe npm run test:e2e
+```
+
+Test E2E uruchamia lokalnie osobne procesy Uvicorn i Vite na portach 8001 oraz 4173. Nie wymaga Dockera ani nie używa danych aplikacji.
+
 ## Uwaga produkcyjna
 
 Ustaw `SECRET_KEY` jako zmienną środowiskową. Ten projekt jest prostym MVP, więc JSON jest OK do nauki/demo, ale do wielu użytkowników naraz lepsza będzie normalna baza danych.

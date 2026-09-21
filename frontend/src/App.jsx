@@ -15,7 +15,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { EventsCalendar, MonthCalendar, YearCalendar } from './components/CalendarViews.jsx';
+import CalendarPanel from './components/CalendarPanel.jsx';
+import AppHeader from './components/AppHeader.jsx';
+import AuthPage from './components/AuthPage.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 import { API, authHeaders, formatApiError } from './utils/api.js';
 import {
@@ -428,65 +430,10 @@ function App() {
     && proposal.participants?.some((participant) => participant.id === currentUser?.id)
   );
 
-  if (!token) {
-    return <main className="auth-page">
-      <ThemeToggle
-        theme={theme}
-        onToggle={toggleTheme}
-      />
-      <section className="card auth-card">
-        <div className="logo"><CalendarDays /> Event Planner</div>
-        <h1>{mode === 'login' ? 'Logowanie' : 'Rejestracja'}</h1>
-        <form onSubmit={submitAuth}>
-          <input
-            placeholder="Nazwa użytkownika"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            minLength={3}
-            maxLength={80}
-            autoComplete="username"
-            required
-          />
-          <input
-            placeholder="Hasło"
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            minLength={6}
-            maxLength={128}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            required
-          />
-          <button>{mode === 'login' ? 'Zaloguj' : 'Utwórz konto'}</button>
-        </form>
-        <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-          {mode === 'login' ? 'Nie masz konta? Zarejestruj się' : 'Masz konto? Zaloguj się'}
-        </button>
-        {message && <p className="error">{message}</p>}
-      </section>
-    </main>;
-  }
+  if (!token) return <AuthPage mode={mode} username={username} password={password} message={message} theme={theme} onToggleTheme={toggleTheme} onSubmit={submitAuth} onModeChange={() => setMode(mode === 'login' ? 'register' : 'login')} onUsernameChange={setUsername} onPasswordChange={setPassword} />;
 
   return <main className="app">
-    <header>
-      <div>
-        <h1>Planowanie wydarzeń</h1>
-        <p>Zaznacz kiedy nie możesz i twórz propozycje wydarzeń dla wybranych uczestników.</p>
-        {currentUser && (
-          <div className="user-meta">
-            {currentUser.username}
-            {isAdmin && <span>Admin</span>}
-          </div>
-        )}
-      </div>
-      <div className="header-actions">
-        <ThemeToggle
-          theme={theme}
-          onToggle={toggleTheme}
-        />
-        <button type="button" className="secondary" onClick={logout}><LogOut size={18}/> Wyloguj</button>
-      </div>
-    </header>
+    <AppHeader currentUser={currentUser} theme={theme} onToggleTheme={toggleTheme} onLogout={logout} />
 
     {message && <p className="error">{message}</p>}
 
@@ -834,64 +781,18 @@ function App() {
         </section>
       </div>
 
-      <section className={`card calendar-card calendar-${calendarView}-view ${mobilePanel === 'calendar' ? 'mobile-active' : ''}`}>
-        <div className="calendar-nav">
-          <div className="nav-group">
-            <button type="button" className="secondary icon-label" onClick={() => navigateCalendar(-1)}>
-              <ChevronLeft size={18}/> Poprzedni
-            </button>
-            <button type="button" className="secondary icon-only" onClick={() => setVisibleDate(startOfDay(new Date()))} title="Dzisiaj">
-              <CalendarDays size={18}/>
-            </button>
-            <button type="button" className="secondary icon-label" onClick={() => navigateCalendar(1)}>
-              Następny <ChevronRight size={18}/>
-            </button>
-          </div>
-          <strong>{calendarTitle}</strong>
-          <div className="view-toggle" role="group" aria-label="Widok kalendarza">
-            <button
-              type="button"
-              className={calendarView === 'month' ? 'toggle active' : 'toggle'}
-              onClick={() => setCalendarView('month')}
-              aria-pressed={calendarView === 'month'}
-              aria-label="Widok miesiąca"
-              title="Widok miesiąca"
-            >
-              <CalendarDays size={18}/> Miesiąc
-            </button>
-            <button
-              type="button"
-              className={calendarView === 'year' ? 'toggle active' : 'toggle'}
-              onClick={() => setCalendarView('year')}
-              aria-pressed={calendarView === 'year'}
-              aria-label="Widok roku"
-              title="Widok roku"
-            >
-              <CalendarRange size={18}/> Rok
-            </button>
-            <button
-              type="button"
-              className={calendarView === 'events' ? 'toggle active' : 'toggle'}
-              onClick={() => setCalendarView('events')}
-              aria-pressed={calendarView === 'events'}
-              aria-label="Widok wydarzeń"
-              title="Widok wydarzeń"
-            >
-              <List size={18}/> Wydarzenia
-            </button>
-          </div>
-        </div>
-
-        {calendarView === 'month' && (
-          <MonthCalendar visibleDate={visibleDate} slots={busy} proposals={proposals} />
-        )}
-        {calendarView === 'year' && (
-          <YearCalendar visibleDate={visibleDate} slots={busy} onOpenMonth={openMonth} />
-        )}
-        {calendarView === 'events' && (
-          <EventsCalendar visibleDate={visibleDate} slots={busy} proposals={proposals} />
-        )}
-      </section>
+      <CalendarPanel
+        calendarTitle={calendarTitle}
+        calendarView={calendarView}
+        visibleDate={visibleDate}
+        slots={busy}
+        proposals={proposals}
+        mobileActive={mobilePanel === 'calendar'}
+        onNavigate={navigateCalendar}
+        onToday={() => setVisibleDate(startOfDay(new Date()))}
+        onViewChange={setCalendarView}
+        onOpenMonth={openMonth}
+      />
     </section>
   </main>;
 }
