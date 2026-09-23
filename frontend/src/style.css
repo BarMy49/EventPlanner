@@ -434,6 +434,7 @@ p { color: var(--muted); margin: 0 0 8px; }
   .header-actions .theme-toggle { width: 44px; padding: 8px; font-size: 0; }
   .header-actions .theme-toggle svg { margin: 0; }
   .header-actions .secondary:not(.theme-toggle) { width: 100%; }
+  .header-actions .logout-button { grid-column: 2; }
   .user-meta { font-size: 13px; }
   .mobile-tabs .toggle { gap: 6px; padding-inline: 6px; font-size: 12px; }
   .mobile-tabs .toggle svg { width: 16px; height: 16px; }

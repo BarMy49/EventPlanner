@@ -1,7 +1,20 @@
-import { LogOut } from 'lucide-react';
+import { CalendarPlus, LogOut, RefreshCw, Unplug } from 'lucide-react';
 import ThemeToggle from './ThemeToggle.jsx';
 
-export default function AppHeader({ currentUser, theme, onToggleTheme, onLogout }) {
+export default function AppHeader({
+  currentUser,
+  theme,
+  calendarConnection,
+  calendarBusy,
+  onConnectCalendar,
+  onSyncCalendar,
+  onDisconnectCalendar,
+  onToggleTheme,
+  onLogout,
+}) {
+  const calendarAvailable = Boolean(calendarConnection?.available);
+  const calendarConnected = Boolean(calendarConnection?.connected);
+
   return <header>
     <div>
       <h1>Planowanie wydarzeń</h1>
@@ -10,7 +23,29 @@ export default function AppHeader({ currentUser, theme, onToggleTheme, onLogout 
     </div>
     <div className="header-actions">
       <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-      <button type="button" className="secondary" onClick={onLogout}><LogOut size={18}/> Wyloguj</button>
+      {calendarAvailable && !calendarConnected && (
+        <button type="button" className="secondary" onClick={onConnectCalendar} disabled={calendarBusy}>
+          <CalendarPlus size={18}/> Google Calendar
+        </button>
+      )}
+      {calendarAvailable && calendarConnected && (
+        <>
+          <button type="button" className="secondary" onClick={onSyncCalendar} disabled={calendarBusy}>
+            <RefreshCw size={18}/> Synchronizuj
+          </button>
+          <button
+            type="button"
+            className="secondary action-icon"
+            onClick={onDisconnectCalendar}
+            disabled={calendarBusy}
+            title="Odłącz Google Calendar"
+            aria-label="Odłącz Google Calendar"
+          >
+            <Unplug size={18}/>
+          </button>
+        </>
+      )}
+      <button type="button" className="secondary logout-button" onClick={onLogout}><LogOut size={18}/> Wyloguj</button>
     </div>
   </header>;
 }

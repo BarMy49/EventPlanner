@@ -27,6 +27,18 @@ def normalize_data(data: dict[str, Any]) -> dict[str, Any]:
 
     for user in data["users"]:
         user.setdefault("is_admin", user.get("username") == "admin")
+        calendar = user.get("google_calendar")
+        if isinstance(calendar, dict):
+            calendar.setdefault("event_links", {})
+            calendar.setdefault("last_sync_at", None)
+            calendar.setdefault("last_error", None)
+            normalized_links = {}
+            for proposal_id, link in calendar["event_links"].items():
+                if isinstance(link, str):
+                    normalized_links[str(proposal_id)] = {"event_id": link}
+                elif isinstance(link, dict) and link.get("event_id"):
+                    normalized_links[str(proposal_id)] = link
+            calendar["event_links"] = normalized_links
 
     for proposal in data["proposals"]:
         proposal.setdefault("status", "open")

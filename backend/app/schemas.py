@@ -81,3 +81,14 @@ class ProposalOut(BaseModel):
     can_manage: bool = False
     can_close: bool = False
     results: ProposalResults | None = None
+
+
+class GoogleCalendarConnectOut(BaseModel):
+    authorization_url: str
+
+
+class GoogleCalendarStatus(BaseModel):
+    available: bool
+    connected: bool
+    last_sync_at: datetime | None = None
+    last_error: str | None = None

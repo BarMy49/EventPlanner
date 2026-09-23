@@ -1,7 +1,10 @@
 import os
 from datetime import datetime, timezone
-from fastapi import FastAPI, Depends, HTTPException, status
+from urllib.parse import urlencode
+
+from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from .schemas import (
     UserCreate,
@@ -16,6 +19,8 @@ from .schemas import (
     ProposalCreate,
     ProposalVoteCreate,
     ProposalOut,
+    GoogleCalendarConnectOut,
+    GoogleCalendarStatus,
 )
 from .auth import hash_password, verify_password, create_access_token, get_current_user
 from .store import load_data, save_data, find_user_by_username
@@ -27,8 +32,14 @@ from .helpers import (
     resolve_participant_user_ids, now_iso, find_proposal, close_proposal_if_all_voted,
     close_proposal_record, require_proposal_closer, require_proposal_manager
 )
+from .google_calendar import (
+    CalendarConfigurationError,
+    CalendarIntegrationError,
+    GoogleCalendarService,
+)
 
 app = FastAPI(title="Event Planner API")
+google_calendar = GoogleCalendarService()
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,6 +90,119 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
 @app.get("/users/me", response_model=UserOut)
 def me(user: dict = Depends(get_current_user)):
     return user_public(user)
+
+
+def calendar_error_as_http(exc: Exception) -> HTTPException:
+    if isinstance(exc, CalendarConfigurationError):
+        return HTTPException(status_code=503, detail=str(exc))
+    return HTTPException(status_code=502, detail=str(exc))
+
+
+def calendar_callback_redirect(result: str) -> RedirectResponse:
+    try:
+        base_url = google_calendar.config().app_public_url
+    except CalendarConfigurationError:
+        base_url = "http://localhost"
+    return RedirectResponse(f"{base_url}/?{urlencode({'googleCalendar': result})}", status_code=303)
+
+
+@app.get("/integrations/google-calendar/status", response_model=GoogleCalendarStatus)
+def google_calendar_status(current_user: dict = Depends(get_current_user)):
+    return google_calendar.status(current_user)
+
+
+@app.post("/integrations/google-calendar/connect", response_model=GoogleCalendarConnectOut)
+def connect_google_calendar(current_user: dict = Depends(get_current_user)):
+    try:
+        google_calendar.config()
+    except CalendarConfigurationError as exc:
+        raise calendar_error_as_http(exc)
+
+    store = load_data()
+    user = find_user_by_id(store, current_user["id"])
+    state_record = google_calendar.create_oauth_state()
+    user["google_calendar_oauth_state"] = state_record
+    save_data(store)
+
+    try:
+        authorization_url = google_calendar.authorization_url(state_record["value"])
+    except (CalendarConfigurationError, CalendarIntegrationError) as exc:
+        raise calendar_error_as_http(exc)
+    return GoogleCalendarConnectOut(authorization_url=authorization_url)
+
+
+@app.get("/integrations/google-calendar/callback", include_in_schema=False)
+def google_calendar_callback(
+    code: str | None = Query(default=None),
+    state_value: str | None = Query(default=None, alias="state"),
+    error: str | None = Query(default=None),
+):
+    store = load_data()
+    user = next(
+        (
+            item
+            for item in store["users"]
+            if google_calendar.oauth_state_is_valid(item.get("google_calendar_oauth_state"), state_value or "")
+        ),
+        None,
+    )
+    if not user:
+        return calendar_callback_redirect("error")
+
+    user.pop("google_calendar_oauth_state", None)
+    if error or not code:
+        save_data(store)
+        return calendar_callback_redirect("cancelled")
+
+    try:
+        refresh_token = google_calendar.exchange_code(code)
+        calendar = user.setdefault("google_calendar", {})
+        calendar["refresh_token"] = google_calendar.encrypt_refresh_token(refresh_token)
+        calendar.setdefault("event_links", {})
+        calendar["connected_at"] = now_iso()
+        calendar["last_error"] = None
+        calendar["last_sync_at"] = None
+        save_data(store)
+        google_calendar.sync_user(user, store["proposals"])
+        save_data(store)
+    except (CalendarConfigurationError, CalendarIntegrationError):
+        save_data(store)
+        return calendar_callback_redirect("error")
+
+    return calendar_callback_redirect("sync-error" if calendar.get("last_error") else "connected")
+
+
+@app.post("/integrations/google-calendar/sync", response_model=GoogleCalendarStatus)
+def sync_google_calendar(current_user: dict = Depends(get_current_user)):
+    try:
+        google_calendar.config()
+    except CalendarConfigurationError as exc:
+        raise calendar_error_as_http(exc)
+
+    store = load_data()
+    user = find_user_by_id(store, current_user["id"])
+    if not user.get("google_calendar", {}).get("refresh_token"):
+        raise HTTPException(status_code=409, detail="Google Calendar is not connected")
+    google_calendar.sync_user(user, store["proposals"])
+    save_data(store)
+    return google_calendar.status(user)
+
+
+@app.delete("/integrations/google-calendar/connection", response_model=GoogleCalendarStatus)
+def disconnect_google_calendar(current_user: dict = Depends(get_current_user)):
+    try:
+        google_calendar.config()
+    except CalendarConfigurationError as exc:
+        raise calendar_error_as_http(exc)
+
+    store = load_data()
+    user = find_user_by_id(store, current_user["id"])
+    try:
+        google_calendar.disconnect_user(user, store["proposals"])
+    except (CalendarConfigurationError, CalendarIntegrationError) as exc:
+        raise calendar_error_as_http(exc)
+    save_data(store)
+    return google_calendar.status(user)
 
 
 @app.get("/users", response_model=list[UserOut])
@@ -155,6 +279,11 @@ def delete_user_by_admin(user_id: int, current_user: dict = Depends(get_current_
     user = find_user_by_id(store, user_id)
     if user.get("is_admin") and admin_count(store) <= 1:
         raise HTTPException(status_code=400, detail="Cannot delete the last admin")
+    if user.get("google_calendar", {}).get("refresh_token"):
+        try:
+            google_calendar.disconnect_user(user, store["proposals"])
+        except (CalendarConfigurationError, CalendarIntegrationError) as exc:
+            raise calendar_error_as_http(exc)
 
     store["users"] = [item for item in store["users"] if item["id"] != user_id]
     store["busy_slots"] = [slot for slot in store["busy_slots"] if slot["user_id"] != user_id]
@@ -286,6 +415,8 @@ def create_proposal(data: ProposalCreate, current_user: dict = Depends(get_curre
     store["next_proposal_id"] += 1
     store["proposals"].append(proposal)
     save_data(store)
+    google_calendar.sync_connected_users_for_proposal(store, proposal)
+    save_data(store)
 
     users_by_id = {u["id"]: u for u in store["users"]}
     return proposal_public(proposal, users_by_id, current_user)
@@ -312,8 +443,12 @@ def vote_proposal(
         vote["vote"] = data.vote
     else:
         proposal["votes"].append({"user_id": current_user["id"], "vote": data.vote})
+    was_open = proposal.get("status") == "open"
     close_proposal_if_all_voted(proposal)
     save_data(store)
+    if was_open and proposal.get("status") == "closed":
+        google_calendar.sync_connected_users_for_proposal(store, proposal)
+        save_data(store)
 
     users_by_id = {u["id"]: u for u in store["users"]}
     return proposal_public(proposal, users_by_id, current_user)
@@ -328,6 +463,8 @@ def close_proposal(proposal_id: int, current_user: dict = Depends(get_current_us
     if proposal.get("status") != "closed":
         close_proposal_record(proposal)
         save_data(store)
+        google_calendar.sync_connected_users_for_proposal(store, proposal)
+        save_data(store)
 
     users_by_id = {u["id"]: u for u in store["users"]}
     return proposal_public(proposal, users_by_id, current_user)
@@ -339,6 +476,7 @@ def delete_proposal(proposal_id: int, current_user: dict = Depends(get_current_u
     proposal = find_proposal(store, proposal_id)
     require_proposal_manager(proposal, current_user)
 
+    google_calendar.delete_proposal_events(store, proposal)
     store["proposals"] = [item for item in store["proposals"] if item["id"] != proposal_id]
     save_data(store)
     return {"deleted": True}

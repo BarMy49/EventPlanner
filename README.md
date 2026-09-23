@@ -87,6 +87,21 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD=strong-password SECRET_KEY=change-me docker 
 `docker-compose.yml` przekazuje `ADMIN_USERNAME` i `ADMIN_PASSWORD` do backendu.
 Backend czyta je przy starcie i tworzy albo aktualizuje konto administratora o tej nazwie.
 
+## Google Calendar
+
+Po ustawieniu zmiennych `GOOGLE_OAUTH_*`, `GOOGLE_TOKEN_ENCRYPTION_KEY` oraz
+`APP_PUBLIC_URL` użytkownik może połączyć swoje konto Google z nagłówka aplikacji.
+W Google Cloud utwórz klienta OAuth typu **Web application** i dodaj dokładnie ten
+adres przekierowania:
+
+```text
+https://twoja-domena.example/api/integrations/google-calendar/callback
+```
+
+Po połączeniu aplikacja synchronizuje bieżące i przyszłe propozycje danego użytkownika:
+otwarte głosowania są oznaczone jako oczekujące, zatwierdzone większością są aktualizowane,
+a odrzucone propozycje są usuwane z Kalendarza Google.
+
 ## Gdzie są dane?
 
 Po pierwszym uruchomieniu backend utworzy plik:

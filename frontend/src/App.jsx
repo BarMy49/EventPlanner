@@ -48,6 +48,8 @@ function App() {
   const [mode, setMode] = useState('login');
   const [busy, setBusy] = useState([]);
   const [proposals, setProposals] = useState([]);
+  const [calendarConnection, setCalendarConnection] = useState(null);
+  const [calendarBusy, setCalendarBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [visibleDate, setVisibleDate] = useState(startOfDay(new Date()));
   const [calendarView, setCalendarView] = useState('month');
@@ -81,6 +83,19 @@ function App() {
 
   useEffect(() => () => {
     window.clearTimeout(themeAnimationTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get('googleCalendar');
+    if (!result) return;
+    const messages = {
+      connected: 'Google Calendar został połączony.',
+      'sync-error': 'Google Calendar został połączony, ale synchronizacja wymaga ponowienia.',
+      cancelled: 'Połączenie z Google Calendar zostało anulowane.',
+      error: 'Nie udało się połączyć z Google Calendar.',
+    };
+    setMessage(messages[result] || 'Nie udało się odczytać odpowiedzi Google Calendar.');
+    window.history.replaceState({}, '', window.location.pathname);
   }, []);
 
   function toggleTheme() {
@@ -144,10 +159,12 @@ function App() {
     const busyData = await api('/busy', { headers });
     const proposalsData = await api('/proposals', { headers });
     const usersData = await api('/users', { headers });
+    const calendarData = await api('/integrations/google-calendar/status', { headers });
     setCurrentUser(meData);
     setBusy(busyData);
     setProposals(proposalsData);
     setUsers(usersData);
+    setCalendarConnection(calendarData);
     const selectableParticipantIds = new Set(
       usersData
         .filter((user) => user.id !== meData.id)
@@ -176,6 +193,7 @@ function App() {
         setUsers([]);
         setBusy([]);
         setProposals([]);
+        setCalendarConnection(null);
         setProposalParticipantIds([]);
         setSelectedUserId('');
         cancelEditing();
@@ -394,6 +412,58 @@ function App() {
     }
   }
 
+  async function connectGoogleCalendar() {
+    setMessage('');
+    setCalendarBusy(true);
+    try {
+      const data = await api('/integrations/google-calendar/connect', {
+        method: 'POST',
+        headers: authHeaders(token),
+      });
+      window.location.assign(data.authorization_url);
+    } catch (err) {
+      setMessage(err.message);
+      setCalendarBusy(false);
+    }
+  }
+
+  async function syncGoogleCalendar() {
+    setMessage('');
+    setCalendarBusy(true);
+    try {
+      const data = await api('/integrations/google-calendar/sync', {
+        method: 'POST',
+        headers: authHeaders(token),
+      });
+      setCalendarConnection(data);
+      setMessage(data.last_error || 'Google Calendar został zsynchronizowany.');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  async function disconnectGoogleCalendar() {
+    if (!window.confirm('Odłączyć Google Calendar i usunąć przyszłe wydarzenia utworzone przez Event Planner?')) {
+      return;
+    }
+    setMessage('');
+    setCalendarBusy(true);
+    try {
+      const data = await api('/integrations/google-calendar/connection', {
+        method: 'DELETE',
+        headers: authHeaders(token),
+      });
+      setCalendarConnection(data);
+      setMessage('Google Calendar został odłączony.');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
   function logout() {
     localStorage.removeItem('token');
     setToken('');
@@ -401,6 +471,7 @@ function App() {
     setUsers([]);
     setBusy([]);
     setProposals([]);
+    setCalendarConnection(null);
     setProposalParticipantIds([]);
     setSelectedUserId('');
     cancelEditing();
@@ -433,7 +504,17 @@ function App() {
   if (!token) return <AuthPage mode={mode} username={username} password={password} message={message} theme={theme} onToggleTheme={toggleTheme} onSubmit={submitAuth} onModeChange={() => setMode(mode === 'login' ? 'register' : 'login')} onUsernameChange={setUsername} onPasswordChange={setPassword} />;
 
   return <main className="app">
-    <AppHeader currentUser={currentUser} theme={theme} onToggleTheme={toggleTheme} onLogout={logout} />
+    <AppHeader
+      currentUser={currentUser}
+      theme={theme}
+      calendarConnection={calendarConnection}
+      calendarBusy={calendarBusy}
+      onConnectCalendar={connectGoogleCalendar}
+      onSyncCalendar={syncGoogleCalendar}
+      onDisconnectCalendar={disconnectGoogleCalendar}
+      onToggleTheme={toggleTheme}
+      onLogout={logout}
+    />
 
     {message && <p className="error">{message}</p>}
 
