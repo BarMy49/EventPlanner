@@ -54,6 +54,7 @@ class ProposalCreate(BaseModel):
     title: str = Field(min_length=3, max_length=120)
     start_time: datetime
     end_time: datetime
+    is_all_day: bool = True
     participant_user_ids: list[int] = Field(default_factory=list)
 
 class ProposalVoteCreate(BaseModel):
@@ -73,6 +74,7 @@ class ProposalOut(BaseModel):
     title: str
     start_time: datetime
     end_time: datetime
+    is_all_day: bool = True
     status: Literal["open", "closed"]
     created_at: datetime
     closed_at: datetime | None = None

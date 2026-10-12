@@ -406,6 +406,7 @@ def create_proposal(data: ProposalCreate, current_user: dict = Depends(get_curre
         "title": title,
         "start_time": data.start_time.isoformat(),
         "end_time": data.end_time.isoformat(),
+        "is_all_day": getattr(data, "is_all_day", True),
         "participant_user_ids": participant_user_ids,
         "status": "open",
         "created_at": now_iso(),

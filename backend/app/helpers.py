@@ -139,6 +139,7 @@ def proposal_public(proposal: dict, users_by_id: dict[int, dict], current_user: 
         title=proposal["title"],
         start_time=datetime.fromisoformat(proposal["start_time"]),
         end_time=datetime.fromisoformat(proposal["end_time"]),
+        is_all_day=proposal.get("is_all_day", True),
         status=status_value,
         created_at=datetime.fromisoformat(proposal["created_at"]),
         closed_at=datetime.fromisoformat(proposal["closed_at"]) if proposal.get("closed_at") else None,
@@ -189,4 +190,3 @@ def ensure_admin_user() -> None:
     store["next_user_id"] += 1
     store["users"].append(user)
     save_data(store)
-

@@ -42,6 +42,7 @@ def normalize_data(data: dict[str, Any]) -> dict[str, Any]:
 
     for proposal in data["proposals"]:
         proposal.setdefault("status", "open")
+        proposal.setdefault("is_all_day", True)
         proposal.setdefault("votes", [])
         participant_user_ids = []
         for user_id in proposal.get("participant_user_ids", []):

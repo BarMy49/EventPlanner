@@ -206,7 +206,7 @@ export function buildBusyPayload(startValue, endValue, userId) {
   return payload;
 }
 
-export function buildProposalPayload(titleValue, startValue, endValue, participantIds) {
+export function buildProposalPayload(titleValue, startValue, endValue, participantIds, isAllDay = true, startTimeValue = '12:00', endTimeValue = '13:00') {
   const title = titleValue.trim();
   if (!title) {
     throw new Error('Podaj nazwę wydarzenia.');
@@ -217,11 +217,32 @@ export function buildProposalPayload(titleValue, startValue, endValue, participa
     throw new Error('Wybierz co najmniej jednego uczestnika wydarzenia.');
   }
 
-  const payload = buildBusyPayload(startValue, endValue);
+  let startIso, endIso;
+  if (isAllDay) {
+    const payload = buildBusyPayload(startValue, endValue);
+    startIso = payload.start_time;
+    endIso = payload.end_time;
+  } else {
+    const startDate = fromDateInputValue(startValue);
+    const [startH, startM] = startTimeValue.split(':');
+    startDate.setHours(Number(startH), Number(startM));
+
+    const endDate = fromDateInputValue(endValue);
+    const [endH, endM] = endTimeValue.split(':');
+    endDate.setHours(Number(endH), Number(endM));
+
+    if (endDate <= startDate) {
+      throw new Error('Data i godzina końca nie mogą być wcześniejsze.');
+    }
+    startIso = startDate.toISOString();
+    endIso = endDate.toISOString();
+  }
+
   return {
     title,
-    start_time: payload.start_time,
-    end_time: payload.end_time,
+    start_time: startIso,
+    end_time: endIso,
+    is_all_day: isAllDay,
     participant_user_ids: participantUserIds,
   };
 }
@@ -238,4 +259,30 @@ export function voteLabel(vote) {
   if (vote === 'yes') return 'za';
   if (vote === 'no') return 'przeciw';
   return '';
+}
+
+
+export function formatProposalDateRange(proposal) {
+  const startDate = new Date(proposal.start_time);
+  const endDate = new Date(proposal.end_time);
+
+  if (proposal.is_all_day === false) {
+    const formatDateTime = (d) => {
+      const datePart = DATE_FORMATTER.format(d);
+      const timePart = d.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+      return datePart + ', ' + timePart; 
+    };
+    // need to format manually in JS, so we'll just write pure JS code
+    const datePart1 = DATE_FORMATTER.format(startDate);
+    const timePart1 = startDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    const datePart2 = DATE_FORMATTER.format(endDate);
+    const timePart2 = endDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    
+    if (isSameDay(startDate, endDate)) {
+      return datePart1 + ', ' + timePart1 + ' - ' + timePart2;
+    }
+    return datePart1 + ', ' + timePart1 + ' - ' + datePart2 + ', ' + timePart2;
+  }
+  
+  return formatSlotDateRange(proposal);
 }

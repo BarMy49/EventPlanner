@@ -29,6 +29,7 @@ import {
   buildProposalPayload,
   formatProposalParticipants,
   formatSlotDateRange,
+  formatProposalDateRange,
   getSlotEndInputValue,
   getSlotStartInputValue,
   startOfDay,
@@ -61,6 +62,9 @@ function App() {
   const [proposalTitle, setProposalTitle] = useState('');
   const [proposalStart, setProposalStart] = useState(toDateInputValue(new Date()));
   const [proposalEnd, setProposalEnd] = useState(toDateInputValue(new Date()));
+  const [proposalIsAllDay, setProposalIsAllDay] = useState(true);
+  const [proposalStartTime, setProposalStartTime] = useState("12:00");
+  const [proposalEndTime, setProposalEndTime] = useState("13:00");
   const [proposalParticipantIds, setProposalParticipantIds] = useState([]);
   const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
@@ -226,7 +230,7 @@ function App() {
     e.preventDefault();
     setMessage('');
     try {
-      const payload = buildProposalPayload(proposalTitle, proposalStart, proposalEnd, proposalParticipantIds);
+      const payload = buildProposalPayload(proposalTitle, proposalStart, proposalEnd, proposalParticipantIds, proposalIsAllDay, proposalStartTime, proposalEndTime);
       await api('/proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
@@ -234,6 +238,9 @@ function App() {
       });
       setProposalTitle('');
       setProposalParticipantIds([]);
+      setProposalIsAllDay(true);
+      setProposalStartTime('12:00');
+      setProposalEndTime('13:00');
       await loadData();
     } catch (err) {
       setMessage(err.message);
@@ -651,8 +658,14 @@ function App() {
               required
             />
           </label>
-          <label>Od<input type="date" value={proposalStart} onChange={e => updateRangeStart(e.target.value, proposalEnd, setProposalStart, setProposalEnd)} required /></label>
-          <label>Do<input type="date" value={proposalEnd} onChange={e => updateRangeEnd(e.target.value, proposalStart, setProposalStart, setProposalEnd)} required /></label>
+          <label className="checkbox-label">
+            <input type="checkbox" checked={proposalIsAllDay} onChange={e => setProposalIsAllDay(e.target.checked)} />
+            Całodniowe
+          </label>
+          <div className="date-time-group" style={{ display: 'flex', gap: '8px' }}>
+            <label style={{ flex: 1 }}>Od { !proposalIsAllDay && <input type="time" value={proposalStartTime} onChange={e => setProposalStartTime(e.target.value)} required /> }<input type="date" value={proposalStart} onChange={e => updateRangeStart(e.target.value, proposalEnd, setProposalStart, setProposalEnd)} required /></label>
+            <label style={{ flex: 1 }}>Do { !proposalIsAllDay && <input type="time" value={proposalEndTime} onChange={e => setProposalEndTime(e.target.value)} required /> }<input type="date" value={proposalEnd} onChange={e => updateRangeEnd(e.target.value, proposalStart, setProposalStart, setProposalEnd)} required /></label>
+          </div>
           <div className="participant-field">
             <span>Uczestnicy</span>
             <div className="participant-options" role="group" aria-label="Uczestnicy wydarzenia">
@@ -681,7 +694,7 @@ function App() {
               <div className="proposal-head">
                 <div>
                   <b>{proposal.title}</b>
-                  <span>{formatSlotDateRange(proposal)}</span>
+                  <span>{formatProposalDateRange(proposal)}</span>
                   <small>Autor: {proposal.creator_username}</small>
                   <small>Uczestnicy: {formatProposalParticipants(proposal)}</small>
                 </div>

@@ -7,6 +7,7 @@ import {
   formatDate,
   formatProposalParticipants,
   formatSlotDateRange,
+  formatProposalDateRange,
   getCalendarItemsForDate,
   getMonthActualDays,
   getMonthDays,
@@ -168,7 +169,7 @@ export function EventsCalendar({ visibleDate, slots, proposals }) {
                   </span>
                   <div className="event-details">
                     <b>{item.proposal.title}</b>
-                    <span>{formatSlotDateRange(item.proposal)}</span>
+                    <span>{formatProposalDateRange(item.proposal)}</span>
                     <small>Autor: {item.proposal.creator_username}</small>
                     <small>Uczestnicy: {formatProposalParticipants(item.proposal)}</small>
                   </div>

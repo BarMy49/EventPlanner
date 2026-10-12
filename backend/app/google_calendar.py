@@ -154,10 +154,10 @@ class GoogleCalendarService:
         except Exception as exc:
             raise CalendarConfigurationError("EVENT_TIME_ZONE is not a valid IANA time zone") from exc
 
-    def _proposal_dates(self, proposal: dict) -> tuple[date, date]:
+    def _proposal_dates(self, proposal: dict) -> tuple[datetime, datetime]:
         timezone_value = self._timezone()
-        start = datetime.fromisoformat(proposal["start_time"]).astimezone(timezone_value).date()
-        end = datetime.fromisoformat(proposal["end_time"]).astimezone(timezone_value).date()
+        start = datetime.fromisoformat(proposal["start_time"]).astimezone(timezone_value)
+        end = datetime.fromisoformat(proposal["end_time"]).astimezone(timezone_value)
         return start, end
 
     def _proposal_state(self, proposal: dict) -> str | None:
@@ -173,11 +173,13 @@ class GoogleCalendarService:
 
     def _is_current_or_future(self, proposal: dict) -> bool:
         _, end = self._proposal_dates(proposal)
-        return end > datetime.now(self._timezone()).date()
+        return end.date() > datetime.now(self._timezone()).date()
 
     def _event_body(self, proposal: dict, state: str) -> dict:
         start, end = self._proposal_dates(proposal)
         config = self.config()
+        is_all_day = proposal.get("is_all_day", True)
+        
         if state == "pending":
             summary = f"Głosowanie: {proposal['title']}"
             description = f"Głosowanie trwa. Oddaj głos w Event Planner: {config.app_public_url}"
@@ -186,12 +188,11 @@ class GoogleCalendarService:
             summary = f"Potwierdzone: {proposal['title']}"
             description = f"Wydarzenie zaakceptowane w Event Planner: {config.app_public_url}"
             status = "confirmed"
-        return {
+            
+        body = {
             "summary": summary,
             "description": description,
             "status": status,
-            "start": {"date": start.isoformat()},
-            "end": {"date": end.isoformat()},
             "extendedProperties": {
                 "private": {
                     "event_planner_proposal_id": str(proposal["id"]),
@@ -199,6 +200,16 @@ class GoogleCalendarService:
                 }
             },
         }
+        
+        if is_all_day:
+            body["start"] = {"date": start.date().isoformat()}
+            body["end"] = {"date": end.date().isoformat()}
+        else:
+            timezone_str = str(self._timezone())
+            body["start"] = {"dateTime": start.isoformat(), "timeZone": timezone_str}
+            body["end"] = {"dateTime": end.isoformat(), "timeZone": timezone_str}
+            
+        return body
 
     def _delete_event(self, api, event_id: str) -> None:
         try:
