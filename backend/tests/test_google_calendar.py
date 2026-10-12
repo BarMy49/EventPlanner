@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from cryptography.fernet import Fernet
 
 from app import main
-from app.google_calendar import GoogleCalendarService
+from app.google_calendar import CalendarIntegrationError, GoogleCalendarService
 
 from .conftest import auth, register
 
@@ -169,6 +169,27 @@ def test_disconnect_removes_future_google_events(monkeypatch):
     service.disconnect_user(user, [proposal])
 
     assert api.events_api.deleted[0]["eventId"] == "google-44"
+    assert "google_calendar" not in user
+
+
+def test_disconnect_clears_connection_even_when_api_fails(monkeypatch):
+    configure_calendar(monkeypatch)
+    service = GoogleCalendarService()
+
+    def failing_api(user):
+        raise CalendarIntegrationError("Google Calendar authorization needs to be reconnected")
+
+    monkeypatch.setattr(service, "_calendar_api", failing_api)
+    proposal = future_proposal()
+    user = {
+        "id": 1,
+        "google_calendar": {
+            "refresh_token": "encrypted",
+            "event_links": {"44": {"event_id": "google-44", "state": "pending"}},
+        },
+    }
+
+    service.disconnect_user(user, [proposal])
     assert "google_calendar" not in user
 
 

@@ -319,13 +319,17 @@ class GoogleCalendarService:
             user.pop("google_calendar", None)
             return
 
-        api = self._calendar_api(user)
-        proposals_by_id = {str(proposal["id"]): proposal for proposal in proposals}
-        for proposal_id, link in calendar.get("event_links", {}).items():
-            proposal = proposals_by_id.get(str(proposal_id))
-            if not proposal or self._is_current_or_future(proposal):
-                self._delete_event(api, link["event_id"])
-        user.pop("google_calendar", None)
+        try:
+            api = self._calendar_api(user)
+            proposals_by_id = {str(proposal["id"]): proposal for proposal in proposals}
+            for proposal_id, link in calendar.get("event_links", {}).items():
+                proposal = proposals_by_id.get(str(proposal_id))
+                if not proposal or self._is_current_or_future(proposal):
+                    self._delete_event(api, link["event_id"])
+        except (CalendarIntegrationError, CalendarConfigurationError):
+            pass
+        finally:
+            user.pop("google_calendar", None)
 
     def status(self, user: dict) -> dict:
         calendar = user.get("google_calendar") if isinstance(user.get("google_calendar"), dict) else {}
